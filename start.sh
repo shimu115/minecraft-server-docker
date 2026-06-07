@@ -2,8 +2,7 @@
 
 set -e
 
-# ========= 环境变量配置 =========
-
+# 环境变量配置
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
 SERVER_TYPE=${SERVER_TYPE:-vanilla}
@@ -12,8 +11,7 @@ WORKDIR="/minecraft"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
-# ========= JDK 下载函数 =========
-
+# JDK 下载函数
 download_jdk() {
   local jdk_version="$1"
   local jdk_dir="/usr/lib/jvm/${jdk_version}"
@@ -32,12 +30,12 @@ download_jdk() {
   echo "[info] JDK $jdk_version installed to $jdk_dir"
 }
 
-# ========= 根据 SERVER_TYPE 下载对应 JDK 并设置启动参数 =========
-
+# 根据 SERVER_TYPE 下载对应 JDK 并设置参数
 case "$SERVER_TYPE" in
   vanilla)
-    download_jdk 17
-    JAVA_HOME="/usr/lib/jvm/17"
+    JDK_VERSION=${JAVA_VERSION:-17}
+    download_jdk "$JDK_VERSION"
+    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-server.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar"
@@ -45,8 +43,9 @@ case "$SERVER_TYPE" in
     ;;
 
   forge)
-    download_jdk 17
-    JAVA_HOME="/usr/lib/jvm/17"
+    JDK_VERSION=${JAVA_VERSION:-17}
+    download_jdk "$JDK_VERSION"
+    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-forge-installer.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-installer.jar"
@@ -54,8 +53,9 @@ case "$SERVER_TYPE" in
     ;;
 
   fabric)
-    download_jdk 17
-    JAVA_HOME="/usr/lib/jvm/17"
+    JDK_VERSION=${JAVA_VERSION:-17}
+    download_jdk "$JDK_VERSION"
+    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-fabric-server-launch.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.14.21/1.0.0/server/jar"
@@ -68,10 +68,7 @@ case "$SERVER_TYPE" in
     ;;
 esac
 
-export JAVA_HOME
-export PATH="$JAVA_HOME/bin:$PATH"
-
-# 下载函数
+# 下载服务端 jar
 download_if_needed() {
   if [ ! -f "$1" ]; then
     if [ -z "$DOWNLOAD_URL" ]; then
@@ -86,23 +83,10 @@ download_if_needed() {
   fi
 }
 
-# Forge 内存调整
-adjust_forge_memory() {
-  JVM_ARGS_FILE="user_jvm_args.txt"
-  if [ -f "$JVM_ARGS_FILE" ]; then
-    sed -i "s/-Xmx[^ ]*/-Xmx$Xmx/" "$JVM_ARGS_FILE"
-    sed -i "s/-Xms[^ ]*/-Xms$Xms/" "$JVM_ARGS_FILE"
-    echo "[info] Updated memory in $JVM_ARGS_FILE"
-  else
-    echo "-Xmx$Xmx -Xms$Xms" > "$JVM_ARGS_FILE"
-    echo "[info] Created $JVM_ARGS_FILE with memory settings"
-  fi
-}
-
-# 执行下载 & 安装
 download_if_needed "$JAR_FILE"
 echo "eula=true" > eula.txt
 
+# Forge 安装
 if [ "$SERVER_TYPE" = "forge" ]; then
   if [ ! -f "run.sh" ]; then
     echo "[info] Installing Forge server..."
@@ -112,26 +96,26 @@ if [ "$SERVER_TYPE" = "forge" ]; then
     echo "[info] Forge already installed. Skipping installer."
   fi
 
-  adjust_forge_memory
+  JVM_ARGS_FILE="user_jvm_args.txt"
+  if [ -f "$JVM_ARGS_FILE" ]; then
+    sed -i "s/-Xmx[^ ]*/-Xmx$Xmx/" "$JVM_ARGS_FILE"
+    sed -i "s/-Xms[^ ]*/-Xms$Xms/" "$JVM_ARGS_FILE"
+    echo "[info] Updated memory in $JVM_ARGS_FILE"
+  else
+    echo "-Xmx$Xmx -Xms$Xms" > "$JVM_ARGS_FILE"
+    echo "[info] Created $JVM_ARGS_FILE with memory settings"
+  fi
 fi
 
-# 启动服务端
-echo "[info] Starting $SERVER_TYPE Minecraft server..."
+# 写入环境变量文件，供 run.sh 读取
+cat > /minecraft/.env << EOF
+export JAVA_HOME="$JAVA_HOME"
+export Xmx="$Xmx"
+export Xms="$Xms"
+export SERVER_TYPE="$SERVER_TYPE"
+export JAR_FILE="$JAR_FILE"
+EOF
 
-case "$SERVER_TYPE" in
-  forge)
-    screen -S mcserver -dm ./run.sh
-    ;;
-  vanilla|fabric)
-    screen -S mcserver -dm java -Xmx$Xmx -Xms$Xms -jar "$JAR_FILE" nogui
-    ;;
-esac
+echo "[info] Environment written to /minecraft/.env"
 
-# 日志输出
-LOG_FILE="logs/latest.log"
-while [ ! -f "$LOG_FILE" ]; do
-  sleep 1
-done
-
-echo "[info] Server is running. Streaming logs..."
-tail -F "$LOG_FILE"
+exec ./run.sh

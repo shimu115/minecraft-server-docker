@@ -10,9 +10,10 @@ RUN apt update \
 
 # 拷贝启动脚本
 COPY ./start.sh /
+COPY ./run.sh /minecraft/
 
 # 设置启动脚本可执行
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh /minecraft/run.sh
 
 # 工作目录
 WORKDIR /minecraft
