@@ -5,6 +5,7 @@ java/
 data/
 *.1
 *.2
+minecraft/
 
 # IDE
 .idea/

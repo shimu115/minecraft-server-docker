@@ -6,6 +6,7 @@ set -e
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
 SERVER_TYPE=${SERVER_TYPE:-vanilla}
+RUN_SCRIPT_URL=${RUN_SCRIPT_URL:-https://raw.githubusercontent.com/shimu115/minecraft-server-docker/refs/heads/main/run.sh}
 
 WORKDIR="/minecraft"
 mkdir -p "$WORKDIR"
@@ -33,7 +34,7 @@ download_jdk() {
 # 根据 SERVER_TYPE 下载对应 JDK 并设置参数
 case "$SERVER_TYPE" in
   vanilla)
-    JDK_VERSION=${JAVA_VERSION:-17}
+    JDK_VERSION=${JAVA_VERSION:-21}
     download_jdk "$JDK_VERSION"
     JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-server.jar}
@@ -68,6 +69,9 @@ case "$SERVER_TYPE" in
     ;;
 esac
 
+export JAVA_HOME
+export PATH="$JAVA_HOME/bin:$PATH"
+
 # 下载服务端 jar
 download_if_needed() {
   if [ ! -f "$1" ]; then
@@ -83,15 +87,33 @@ download_if_needed() {
   fi
 }
 
-download_if_needed "$JAR_FILE"
+# Forge 安装器始终重新下载，避免版本残留
+if [ "$SERVER_TYPE" = "forge" ]; then
+  echo "[info] Downloading $JAR_FILE..."
+  wget -q "$DOWNLOAD_URL" -O "$JAR_FILE"
+  echo "[info] Downloaded $JAR_FILE."
+else
+  download_if_needed "$JAR_FILE"
+fi
+
 echo "eula=true" > eula.txt
 
 # Forge 安装
 if [ "$SERVER_TYPE" = "forge" ]; then
-  if [ ! -f "run.sh" ]; then
+  # 用 libraries/ 目录判断是否已安装（新旧 Forge 都会生成）
+  if [ ! -d "libraries" ]; then
     echo "[info] Installing Forge server..."
     java -jar "$JAR_FILE" --installServer
-    chmod +x run.sh
+
+    echo "[info] Forge install finished. Files in workdir:"
+    ls -la
+
+    # Forge >=1.16 会生成 run.sh，改名避免与我们的 run.sh 冲突
+    if [ -f "run.sh" ]; then
+      mv run.sh forge-launcher.sh
+      chmod +x forge-launcher.sh
+      echo "[info] Renamed Forge run.sh to forge-launcher.sh"
+    fi
   else
     echo "[info] Forge already installed. Skipping installer."
   fi
@@ -117,5 +139,11 @@ export JAR_FILE="$JAR_FILE"
 EOF
 
 echo "[info] Environment written to /minecraft/.env"
+
+# 从 GitHub 下载启动脚本
+echo "[info] Downloading run.sh from $RUN_SCRIPT_URL ..."
+wget -q -O /minecraft/run.sh "$RUN_SCRIPT_URL"
+chmod +x /minecraft/run.sh
+echo "[info] run.sh ready."
 
 exec ./run.sh
