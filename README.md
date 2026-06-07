@@ -10,7 +10,7 @@ docker run -d \
   -p 25565:25565 \
   -v $(pwd)/minecraft:/minecraft \
   -e SERVER_TYPE=vanilla \
-  shimu778/minecraft-server:v1.0.0
+  shimu778/minecraft-server:1.0.0
 ```
 
 首次启动会自动下载 JDK 和服务端 jar，稍等片刻即可连接 `localhost:25565`。
@@ -61,7 +61,7 @@ docker run -d \
   -e Xms=1024M \
   -e Xmx=4096M \
   -e TZ=Asia/Shanghai \
-  shimu778/minecraft-server:v1.0.0
+  shimu778/minecraft-server:1.0.0
 ```
 
 ## 重启服务端
