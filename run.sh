@@ -27,18 +27,21 @@ rm -f logs/latest.log
 
 case "$SERVER_TYPE" in
   forge)
-    # Forge 安装器可能生成 run.sh 或 start.sh
-    if [ -f "./run.sh" ]; then
-      FORGE_LAUNCHER="./run.sh"
-    elif [ -f "./start.sh" ]; then
-      FORGE_LAUNCHER="./start.sh"
+    if [ -f "./forge-launcher.sh" ]; then
+      echo "[info] Forge launcher: forge-launcher.sh"
+      screen -L -S mcserver -dm ./forge-launcher.sh
     else
-      echo "[error] No Forge launcher found (run.sh or start.sh)"
-      ls -la
-      exit 1
+      # 旧版 Forge (1.12.2 及更早) — 直接运行 forge-*.jar
+      FORGE_JAR=$(find . -maxdepth 1 -name "forge-*.jar" -not -name "*installer*" 2>/dev/null | head -1)
+      if [ -n "$FORGE_JAR" ]; then
+        echo "[info] Forge launcher: $FORGE_JAR"
+        screen -L -S mcserver -dm java -Xmx$Xmx -Xms$Xms -jar "$FORGE_JAR" nogui
+      else
+        echo "[error] No Forge launcher found"
+        ls -la
+        exit 1
+      fi
     fi
-    echo "[info] Forge launcher: $FORGE_LAUNCHER"
-    screen -L -S mcserver -dm $FORGE_LAUNCHER
     ;;
   vanilla|fabric)
     screen -L -S mcserver -dm java -Xmx$Xmx -Xms$Xms -jar "$JAR_FILE" nogui
