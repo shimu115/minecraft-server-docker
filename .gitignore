@@ -1,0 +1,19 @@
+# JDK binaries (downloaded at build time)
+java/
+
+# Data directory (security.txt, H2 database, etc.)
+data/
+*.1
+*.2
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
