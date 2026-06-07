@@ -1,6 +1,6 @@
 services:
   minecraft-server:
-    image: shimu/minecraft-server:v1.0.0
+    image: shimu778/minecraft-server:v1.0.0
     container_name: minecraft-server-1.12.2-forge-2
     ports:
       - "25565:25565"

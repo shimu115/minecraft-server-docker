@@ -10,7 +10,7 @@ docker run -d \
   -p 25565:25565 \
   -v $(pwd)/minecraft:/minecraft \
   -e SERVER_TYPE=vanilla \
-  shimu778/minecraft-server:latest
+  shimu778/minecraft-server:v1.0.0
 ```
 
 首次启动会自动下载 JDK 和服务端 jar，稍等片刻即可连接 `localhost:25565`。
@@ -34,6 +34,17 @@ docker run -d \
 | `Xmx` | `1024M` | 最大内存 |
 | `Xms` | `1024M` | 初始内存 |
 | `TZ` | — | 时区，如 `Asia/Shanghai` |
+
+> **注意**：手动设置 `JAVA_VERSION` 时务必核对 Minecraft 版本对应的 JDK 要求，版本不匹配会导致服务端无法启动。
+>
+> | Minecraft 版本 | 所需 JDK |
+> |---------------|----------|
+> | 1.12.2 及更早 | JDK 8 |
+> | 1.13 ~ 1.16.5 | JDK 8 / 11 |
+> | 1.17 ~ 1.20.4 | JDK 17 |
+> | 1.20.5+ | JDK 21 |
+>
+> 上表为通用参考，具体以服务端实际要求为准。
 
 ## 使用示例
 
