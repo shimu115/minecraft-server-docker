@@ -4,20 +4,6 @@ set -e
 
 # ========= 环境变量配置 =========
 
-JAVA_VERSION=${JAVA_VERSION:-21}
-export JAVA_HOME="/usr/lib/jvm/$JAVA_VERSION"
-
-case "$JAVA_VERSION" in
-  8|17|21)
-    ;;
-  *)
-    echo "[ERROR] Unsupported JAVA_VERSION: $JAVA_VERSION (only 8, 17, 21 allowed)"
-    exit 1
-    ;;
-esac
-
-export PATH="$JAVA_HOME/bin:$PATH"
-
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
 SERVER_TYPE=${SERVER_TYPE:-vanilla}
@@ -26,9 +12,32 @@ WORKDIR="/minecraft"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
-# 根据 SERVER_TYPE 设置默认 JAR_FILE 和 DOWNLOAD_URL
+# ========= JDK 下载函数 =========
+
+download_jdk() {
+  local jdk_version="$1"
+  local jdk_dir="/usr/lib/jvm/${jdk_version}"
+
+  if [ -d "$jdk_dir" ] && [ -x "$jdk_dir/bin/java" ]; then
+    echo "[info] JDK $jdk_version already present, skipping download."
+    return
+  fi
+
+  echo "[info] Downloading JDK $jdk_version..."
+  mkdir -p "$jdk_dir"
+  wget -q -O /tmp/jdk.tar.gz \
+    "https://api.adoptium.net/v3/binary/latest/${jdk_version}/ga/linux/x64/jdk/hotspot/normal/eclipse"
+  tar -xzf /tmp/jdk.tar.gz -C "$jdk_dir" --strip-components=1
+  rm /tmp/jdk.tar.gz
+  echo "[info] JDK $jdk_version installed to $jdk_dir"
+}
+
+# ========= 根据 SERVER_TYPE 下载对应 JDK 并设置启动参数 =========
+
 case "$SERVER_TYPE" in
   vanilla)
+    download_jdk 17
+    JAVA_HOME="/usr/lib/jvm/17"
     JAR_FILE=${JAR_FILE:-server.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar"
@@ -36,6 +45,8 @@ case "$SERVER_TYPE" in
     ;;
 
   forge)
+    download_jdk 17
+    JAVA_HOME="/usr/lib/jvm/17"
     JAR_FILE=${JAR_FILE:-forge-installer.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-installer.jar"
@@ -43,6 +54,8 @@ case "$SERVER_TYPE" in
     ;;
 
   fabric)
+    download_jdk 17
+    JAVA_HOME="/usr/lib/jvm/17"
     JAR_FILE=${JAR_FILE:-fabric-server-launch.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.14.21/1.0.0/server/jar"
@@ -54,6 +67,9 @@ case "$SERVER_TYPE" in
     exit 1
     ;;
 esac
+
+export JAVA_HOME
+export PATH="$JAVA_HOME/bin:$PATH"
 
 # 下载函数
 download_if_needed() {
@@ -119,4 +135,3 @@ done
 
 echo "[info] Server is running. Streaming logs..."
 tail -F "$LOG_FILE"
-
