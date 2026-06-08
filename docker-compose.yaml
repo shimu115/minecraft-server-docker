@@ -11,5 +11,7 @@ services:
       Xms: "1024M"
       Xmx: "4096M"
       TZ: Asia/Shanghai
+      ANG: C.UTF-8
+      LC_ALL: C.UTF-8
     volumes:
       - ./minecraft:/minecraft
