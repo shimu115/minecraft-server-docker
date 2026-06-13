@@ -66,6 +66,20 @@ docker run -d \
   -e EULA=true \
   shimu778/minecraft-server:1.0.0
 ```
+**注意**：设置 `EULA=true` 即代表您同意 [Minecraft 最终用户许可协议 (EULA)](https://aka.ms/MinecraftEULA)。
+
+### Docker Compose
+
+可直接下载项目中的 `docker-compose.yaml` 文件使用：
+
+```bash
+# Linux / macOS / Windows (PowerShell)
+curl -O https://raw.githubusercontent.com/shimu115/minecraft-server-docker/refs/heads/main/docker-compose.yaml
+
+docker compose up -d
+```
+
+根据需求修改 `docker-compose.yaml` 中的环境变量（如 `SERVER_TYPE`、`JAVA_VERSION`、`DOWNLOAD_URL`、`Xmx` 等）后启动即可。
 
 ## 重启服务端
 
