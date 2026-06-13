@@ -31,47 +31,10 @@ func (h *serverHandler) Start() http.HandlerFunc {
 			return
 		}
 
-		envFile := filepath.Join(h.mcDir, ".env")
-		env, err := parseEnvFile(envFile)
+		javaCmd, err := service.BuildStartCommand(h.mcDir)
 		if err != nil {
-			writeError(w, fmt.Sprintf("Failed to read .env: %v", err), http.StatusInternalServerError)
+			writeError(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-
-		javaHome := env["JAVA_HOME"]
-		jarFile := env["JAR_FILE"]
-		xmx := env["Xmx"]
-		xms := env["Xms"]
-		serverType := env["SERVER_TYPE"]
-
-		if javaHome == "" || jarFile == "" {
-			writeError(w, "Missing JAVA_HOME or JAR_FILE in .env", http.StatusInternalServerError)
-			return
-		}
-		if xmx == "" {
-			xmx = "1024M"
-		}
-		if xms == "" {
-			xms = "1024M"
-		}
-
-		javaPath := filepath.Join(javaHome, "bin", "java")
-		var javaCmd string
-
-		switch serverType {
-		case "forge":
-			if _, err := os.Stat(filepath.Join(h.mcDir, "forge-launcher.sh")); err == nil {
-				javaCmd = fmt.Sprintf("cd %s && ./forge-launcher.sh", h.mcDir)
-			} else {
-				jar, _ := findForgeJar(h.mcDir)
-				if jar == "" {
-					writeError(w, "No forge launcher found", http.StatusInternalServerError)
-					return
-				}
-				javaCmd = fmt.Sprintf("cd %s && %s -Xmx%s -Xms%s -jar %s nogui", h.mcDir, javaPath, xmx, xms, jar)
-			}
-		default:
-			javaCmd = fmt.Sprintf("cd %s && %s -Xmx%s -Xms%s -jar %s nogui", h.mcDir, javaPath, xmx, xms, jarFile)
 		}
 
 		if err := service.StartServer(javaCmd); err != nil {
@@ -105,13 +68,11 @@ func (h *serverHandler) Restart() http.HandlerFunc {
 			writeError(w, "Server is not running", http.StatusServiceUnavailable)
 			return
 		}
-		// 发送 stop 指令
 		if err := service.StopServer(); err != nil {
 			writeError(w, fmt.Sprintf("Failed to send stop command: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// 等待最多 30 秒，直到 screen 会话结束
 		for i := 0; i < 30; i++ {
 			time.Sleep(1 * time.Second)
 			if !service.SessionExists() {
@@ -119,12 +80,9 @@ func (h *serverHandler) Restart() http.HandlerFunc {
 			}
 		}
 
-		// 清理可能残留的 screen
 		exec.Command("screen", "-wipe").Run()
-
 		time.Sleep(2 * time.Second)
 
-		// 重新启动
 		h.Start().ServeHTTP(w, r)
 	}
 }
@@ -151,62 +109,15 @@ func (h *serverHandler) Status() http.HandlerFunc {
 	}
 }
 
-// parseEnvFile 解析 .env 文件
-func parseEnvFile(path string) (map[string]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	env := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		// 移除 export 前缀
-		line = strings.TrimPrefix(line, "export ")
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			// 移除引号
-			val := strings.Trim(parts[1], "\"'")
-			env[parts[0]] = val
-		}
-	}
-	return env, scanner.Err()
-}
-
-// findForgeJar 查找 forge jar 文件
-func findForgeJar(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, "forge-") && strings.HasSuffix(name, ".jar") &&
-			!strings.Contains(name, "installer") {
-			return name, nil
-		}
-	}
-	return "", fmt.Errorf("no forge jar found")
-}
-
-// getScreenUptime 获取 screen 会话运行时间
 func getScreenUptime() string {
 	cmd := exec.Command("screen", "-ls")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	output := string(out)
-	for _, line := range strings.Split(output, "\n") {
+	for _, line := range strings.Split(string(out), "\n") {
 		if strings.Contains(line, "mcserver") {
-			// 提取时间信息
-			parts := strings.Fields(line)
-			for _, p := range parts {
+			for _, p := range strings.Fields(line) {
 				if strings.Contains(p, ":") && !strings.Contains(p, ".") {
 					return p
 				}
@@ -216,7 +127,6 @@ func getScreenUptime() string {
 	return ""
 }
 
-// detectVersion 尝试从日志中检测 MC 版本
 func detectVersion(logPath string) string {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -227,7 +137,6 @@ func detectVersion(logPath string) string {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Minecraft 日志格式: [time] [Server thread/INFO]: Starting minecraft server version 1.12.2
 		if strings.Contains(line, "Starting minecraft server version") {
 			parts := strings.Fields(line)
 			if len(parts) > 0 {

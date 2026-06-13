@@ -6,7 +6,6 @@ set -e
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
 SERVER_TYPE=${SERVER_TYPE:-vanilla}
-RUN_SCRIPT_URL=${RUN_SCRIPT_URL:-https://raw.githubusercontent.com/shimu115/minecraft-server-docker/refs/heads/main/run.sh}
 EULA=${EULA:-false}
 
 WORKDIR="/minecraft"
@@ -101,7 +100,6 @@ echo "eula=$EULA" > eula.txt
 
 # Forge 安装
 if [ "$SERVER_TYPE" = "forge" ]; then
-  # 用 libraries/ 目录判断是否已安装（新旧 Forge 都会生成）
   if [ ! -d "libraries" ]; then
     echo "[info] Installing Forge server..."
     java -jar "$JAR_FILE" --installServer
@@ -109,7 +107,6 @@ if [ "$SERVER_TYPE" = "forge" ]; then
     echo "[info] Forge install finished. Files in workdir:"
     ls -la
 
-    # Forge >=1.16 会生成 run.sh，改名避免与我们的 run.sh 冲突
     if [ -f "run.sh" ]; then
       mv run.sh forge-launcher.sh
       chmod +x forge-launcher.sh
@@ -130,7 +127,7 @@ if [ "$SERVER_TYPE" = "forge" ]; then
   fi
 fi
 
-# 写入环境变量文件，供 run.sh 读取
+# 写入环境变量文件，供 API 服务读取
 cat > /minecraft/.env << EOF
 export JAVA_HOME="$JAVA_HOME"
 export Xmx="$Xmx"
@@ -140,17 +137,6 @@ export JAR_FILE="$JAR_FILE"
 EOF
 
 echo "[info] Environment written to /minecraft/.env"
+echo "[info] Starting mc-api..."
 
-# 从 GitHub 下载启动脚本
-echo "[info] Downloading run.sh from $RUN_SCRIPT_URL ..."
-wget -q -O /minecraft/run.sh "$RUN_SCRIPT_URL"
-chmod +x /minecraft/run.sh
-echo "[info] run.sh ready."
-
-# 启动 API 服务（后台运行）
-if [ -x /usr/local/bin/mc-api ]; then
-  /usr/local/bin/mc-api &
-  echo "[info] API server started on port ${API_PORT:-25560}"
-fi
-
-exec ./run.sh
+exec /usr/local/bin/mc-api
