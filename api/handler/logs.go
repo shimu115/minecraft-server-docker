@@ -31,6 +31,7 @@ func (h *logHandler) Stream() http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
@@ -52,6 +53,9 @@ func (h *logHandler) Stream() http.HandlerFunc {
 			flusher.Flush()
 		}
 
+		// 心跳：每 15 秒发送 comment 防止代理/浏览器断开
+		go heartbeat(r.Context().Done(), flusher)
+
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -62,7 +66,6 @@ func (h *logHandler) Stream() http.HandlerFunc {
 			case <-ticker.C:
 				lines, err := reader.ReadNewLines()
 				if err != nil {
-					// 尝试重新打开（日志轮转）
 					reader.Close()
 					reader, err = service.NewLogReader(h.logPath)
 					if err != nil {
@@ -78,6 +81,23 @@ func (h *logHandler) Stream() http.HandlerFunc {
 				if len(lines) > 0 {
 					flusher.Flush()
 				}
+			}
+		}
+	}
+}
+
+// heartbeat 定期发送 SSE comment 保持连接
+func heartbeat(done <-chan struct{}, flusher http.Flusher) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			fmt.Fprintf(flusher, ": heartbeat\n\n")
+			if f, ok := flusher.(http.Flusher); ok {
+				f.Flush()
 			}
 		}
 	}
