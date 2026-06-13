@@ -2,6 +2,7 @@ package model
 
 // APIResponse 统一响应格式
 type APIResponse struct {
+	Code    int    `json:"code"`              // HTTP 状态码
 	Status  string `json:"status"`            // "ok" | "error"
 	Message string `json:"message,omitempty"` // 可读消息
 	Data    any    `json:"data,omitempty"`    // 负载数据

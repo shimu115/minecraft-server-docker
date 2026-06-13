@@ -19,6 +19,13 @@ func main() {
 	mcDir := getEnv("MC_DIR", "/minecraft")
 	logPath := filepath.Join(mcDir, "logs", "latest.log")
 
+	// 初始化 API Key
+	apiKey, err := service.InitAPIKey()
+	if err != nil {
+		log.Fatalf("[mc-api] failed to init api key: %v", err)
+	}
+	_ = apiKey // 已由 InitAPIKey 打印到控制台
+
 	mux := http.NewServeMux()
 
 	// 健康检查
@@ -38,7 +45,7 @@ func main() {
 	// 发送指令
 	mux.HandleFunc("POST /api/command", handler.Command())
 
-	h := middleware.CORS(mux)
+	h := middleware.Auth(middleware.CORS(mux))
 
 	// HTTP 服务在 goroutine 中启动
 	go func() {

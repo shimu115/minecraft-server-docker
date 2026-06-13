@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const ScreenName = "mcserver"
@@ -100,6 +102,46 @@ func parseEnvFile(path string) (map[string]string, error) {
 		}
 	}
 	return env, scanner.Err()
+}
+
+// GetPlayerCount 获取当前在线玩家数（发送 list 指令后解析日志）
+func GetPlayerCount(logPath string) int {
+	// 发送 list 指令
+	_ = SendCommand("list")
+
+	// 等待响应写入日志
+	time.Sleep(500 * time.Millisecond)
+
+	// 从日志末尾向前搜索最近的 list 响应
+	f, err := os.Open(logPath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+
+	// 读取文件尾部 (~4KB)
+	stat, _ := f.Stat()
+	offset := stat.Size() - 4096
+	if offset < 0 {
+		offset = 0
+	}
+	buf := make([]byte, stat.Size()-offset)
+	_, _ = f.ReadAt(buf, offset)
+
+	// 按行解析，找 "There are X/Y players online"
+	lines := strings.Split(string(buf), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if idx := strings.Index(line, "There are "); idx != -1 {
+			rest := line[idx+len("There are "):]
+			if slash := strings.Index(rest, "/"); slash != -1 {
+				if n, err := strconv.Atoi(rest[:slash]); err == nil {
+					return n
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // findForgeJar 查找 forge jar 文件

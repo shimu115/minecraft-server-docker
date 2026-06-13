@@ -94,15 +94,17 @@ func (h *serverHandler) Status() http.HandlerFunc {
 
 		resp := model.ServerStatusResponse{
 			Running: running,
-			Players: -1,
+			Players: 0,
 		}
 
 		if running {
 			resp.Uptime = getScreenUptime()
 			resp.Version = detectVersion(filepath.Join(h.mcDir, "logs", "latest.log"))
+			resp.Players = service.GetPlayerCount(filepath.Join(h.mcDir, "logs", "latest.log"))
 		}
 
 		writeJSON(w, model.APIResponse{
+			Code:   http.StatusOK,
 			Status: "ok",
 			Data:   resp,
 		})
@@ -119,7 +121,7 @@ func getScreenUptime() string {
 		if strings.Contains(line, "mcserver") {
 			for _, p := range strings.Fields(line) {
 				if strings.Contains(p, ":") && !strings.Contains(p, ".") {
-					return p
+					return strings.TrimRight(p, "()")
 				}
 			}
 		}
