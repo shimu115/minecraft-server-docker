@@ -1,9 +1,10 @@
 services:
   minecraft-server:
-    image: shimu778/minecraft-server:latest
+    image: shimu778/minecraft-server:api-dev
     container_name: minecraft-server-1.12.2-forge-2
     ports:
       - "25565:25565"
+      - "25560:25560"
     environment:
       JAVA_VERSION: "8"
       SERVER_TYPE: forge

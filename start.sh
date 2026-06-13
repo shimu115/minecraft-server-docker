@@ -147,4 +147,10 @@ wget -q -O /minecraft/run.sh "$RUN_SCRIPT_URL"
 chmod +x /minecraft/run.sh
 echo "[info] run.sh ready."
 
+# 启动 API 服务（后台运行）
+if [ -x /usr/local/bin/mc-api ]; then
+  /usr/local/bin/mc-api &
+  echo "[info] API server started on port ${API_PORT:-25560}"
+fi
+
 exec ./run.sh
