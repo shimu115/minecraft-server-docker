@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.0.0 (2026-06-07)
+
+> Git tag: `v1.0.0` · Commit: `e3aabb4`
+
+### 🔧 修复与改进（自 v1.0.0-beta）
+
+基于测试版的反馈，此版本修复了 EULA 合规性问题，并完善了 CI/CD 流程。
+
+### ✨ 新功能
+
+- **EULA 环境变量**：新增 `EULA` 环境变量，用户必须显式设置 `EULA=true` 方可启动服务端，修复了测试版中默认跳过 EULA 协议的合规问题。（`56e8417`）
+- **容器环境变量配置**：完善了 `docker-compose.yaml` 中的环境变量示例，新增 `LANG` / `LC_ALL` 等配置项。（`b714d17`）
+
+### 🔧 修复
+
+- **镜像标签格式**：修正 Docker Hub 镜像 tag 带 `v` 前缀，文档中版本引用同步更新。（`ea263d6`）
+
+### 🚀 CI/CD
+
+- **双注册表推送**：推送 tag 后自动构建并同时推送到 Docker Hub 和 GitHub Container Registry (ghcr.io)。（`b055b84`）
+- **README 自动同步**：推送镜像后自动将 README.md 同步到 Docker Hub 仓库页面。（`b055b84`）
+- **构建动作升级**：`docker/build-push-action` 升级至 v6 版本。（`36038f4`）
+
+---
+
 ## v1.0.0-beta (2026-06-07) `Pre-release`
 
 > Git tag: `v1.0.0-beta` · Commit: `38d2572`
