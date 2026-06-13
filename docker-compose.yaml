@@ -13,5 +13,9 @@ services:
       TZ: Asia/Shanghai
       ANG: C.UTF-8
       LC_ALL: C.UTF-8
+      # 运行此容器即代表您同意 Minecraft 的 EULA 协议 (https://aka.ms/MinecraftEULA)
+      # eula.txt 中的原内容：
+      # By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
+      EULA: true
     volumes:
       - ./minecraft:/minecraft

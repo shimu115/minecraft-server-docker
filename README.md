@@ -10,8 +10,10 @@ docker run -d \
   -p 25565:25565 \
   -v $(pwd)/minecraft:/minecraft \
   -e SERVER_TYPE=vanilla \
+  -e EULA=true \
   shimu778/minecraft-server:1.0.0
 ```
+**注意**：设置 `EULA=true` 即代表您同意 [Minecraft 最终用户许可协议 (EULA)](https://aka.ms/MinecraftEULA)。
 
 首次启动会自动下载 JDK 和服务端 jar，稍等片刻即可连接 `localhost:25565`。
 
@@ -61,6 +63,7 @@ docker run -d \
   -e Xms=1024M \
   -e Xmx=4096M \
   -e TZ=Asia/Shanghai \
+  -e EULA=true \
   shimu778/minecraft-server:1.0.0
 ```
 

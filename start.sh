@@ -7,6 +7,7 @@ Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
 SERVER_TYPE=${SERVER_TYPE:-vanilla}
 RUN_SCRIPT_URL=${RUN_SCRIPT_URL:-https://raw.githubusercontent.com/shimu115/minecraft-server-docker/refs/heads/main/run.sh}
+EULA=${EULA:-false}
 
 WORKDIR="/minecraft"
 mkdir -p "$WORKDIR"
@@ -96,7 +97,7 @@ else
   download_if_needed "$JAR_FILE"
 fi
 
-echo "eula=true" > eula.txt
+echo "eula=$EULA" > eula.txt
 
 # Forge 安装
 if [ "$SERVER_TYPE" = "forge" ]; then
