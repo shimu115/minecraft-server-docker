@@ -300,100 +300,7 @@ POST /api/auth/refresh
 
 ---
 
-### 9. FTP 管理
-
-#### 9.1 启动 FTP
-
-```
-POST /api/ftp/start
-```
-
-**认证**：需要
-
-**请求体**（可选，不传使用默认值）：
-
-```json
-{
-  "port": 21,
-  "username": "root",
-  "password": "minecraft"
-}
-```
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| port | int | 21 | FTP 监听端口 |
-| username | string | root | FTP 登录用户 |
-| password | string | minecraft | FTP 登录密码 |
-
-**响应**：
-
-```json
-{
-  "code": 200,
-  "status": "ok",
-  "message": "FTP started",
-  "data": {
-    "running": true,
-    "port": 21
-  }
-}
-```
-
-**错误**：
-
-| code | 说明 |
-|------|------|
-| 409 | FTP 已在运行 |
-
-#### 9.2 停止 FTP
-
-```
-POST /api/ftp/stop
-```
-
-**认证**：需要
-
-**响应**：
-
-```json
-{
-  "code": 200,
-  "status": "ok",
-  "message": "FTP stopped"
-}
-```
-
-**错误**：
-
-| code | 说明 |
-|------|------|
-| 503 | FTP 未运行 |
-
-#### 9.3 FTP 状态
-
-```
-GET /api/ftp/status
-```
-
-**认证**：需要
-
-**响应**：
-
-```json
-{
-  "code": 200,
-  "status": "ok",
-  "data": {
-    "running": true,
-    "port": 21
-  }
-}
-```
-
----
-
-### 10. 文件管理
+### 9. 文件管理
 
 文件操作限定在工作目录范围内，无法访问上级目录。
 
@@ -491,13 +398,15 @@ POST /api/files/write?path=<相对路径>
 }
 ```
 
-#### 10.4 删除文件
+#### 9.5 删除文件
 
 ```
 DELETE /api/files/delete?path=<相对路径>
 ```
 
 **认证**：需要
+
+**请求参数**：
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -506,11 +415,102 @@ DELETE /api/files/delete?path=<相对路径>
 **响应**：
 
 ```json
+{"code":200,"status":"ok","message":"Deleted"}
+```
+
+#### 9.6 上传文件
+
+```
+POST /api/files/upload
+```
+
+**认证**：需要
+
+**说明**：multipart/form-data 方式上传，支持子目录。
+
+**表单字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| file | file | 上传的文件（必填） |
+| dir | string | 目标子目录（可选，相对于工作目录） |
+
+**响应**：
+
+```json
 {
   "code": 200,
   "status": "ok",
-  "message": "Deleted"
+  "message": "File uploaded",
+  "data": {"filename": "mods/example.jar"}
 }
+```
+
+**示例**：
+
+```bash
+curl -X POST -H "Authorization: Bearer <key>" \
+  -F "file=@example.jar" \
+  -F "dir=mods" \
+  http://localhost:25560/api/files/upload
+```
+
+#### 9.7 下载文件
+
+```
+GET /api/files/download?path=<相对路径>
+```
+
+**认证**：需要
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| path | string | 文件相对路径（必填） |
+
+**说明**：流式返回文件内容，响应头包含 `Content-Disposition: attachment`，浏览器自动触发下载。
+
+**示例**：
+
+```bash
+curl -H "Authorization: Bearer <key>" \
+  "http://localhost:25560/api/files/download?path=server.jar" \
+  -o server.jar
+```
+
+#### 9.8 导出目录
+
+```
+POST /api/files/export
+```
+
+**认证**：需要
+
+**说明**：将整个工作目录压缩为 zip 或 tar.gz 文件。支持两种请求方式：
+- JSON body：`{"format":"zip"}`
+- 表单提交：`format=zip&key=<api-key>`（用于浏览器表单下载）
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| format | string | 压缩格式：`zip` 或 `tar.gz`（必填） |
+
+**说明**：响应为二进制流，`Content-Disposition: attachment`，浏览器自动下载。
+
+**示例**：
+
+```bash
+# JSON 方式（curl）
+curl -X POST -H "Authorization: Bearer <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"format":"tar.gz"}' \
+  http://localhost:25560/api/files/export \
+  -o minecraft.tar.gz
+
+# 表单方式（浏览器）
+# POST /api/files/export  body: format=zip&key=<api-key>
 ```
 
 ---
@@ -555,17 +555,17 @@ curl -H "$AUTH" "$HOST/api/logs?tail=100"
 # 刷新 API Key
 curl -X POST -H "$AUTH" $HOST/api/auth/refresh
 
-# FTP 管理
-curl -X POST -H "$AUTH" -H "Content-Type: application/json" \
-  -d '{"port":21}' $HOST/api/ftp/start
-curl -H "$AUTH" $HOST/api/ftp/status
-curl -X POST -H "$AUTH" $HOST/api/ftp/stop
-
-# 文件管理
+# 文件管理 - 列表 / 读取 / 写入 / 删除
 curl -H "$AUTH" "$HOST/api/files/list?path="
 curl -H "$AUTH" "$HOST/api/files/read?path=server.properties"
 curl -X POST -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"content":"enable-command-block=true"}' \
   "$HOST/api/files/write?path=server.properties"
 curl -X DELETE -H "$AUTH" "$HOST/api/files/delete?path=old-file.txt"
+
+# 文件管理 - 上传 / 下载 / 导出
+curl -X POST -H "$AUTH" -F "file=@mod.jar" -F "dir=mods" $HOST/api/files/upload
+curl -H "$AUTH" "$HOST/api/files/download?path=server.jar" -o server.jar
+curl -X POST -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"format":"zip"}' $HOST/api/files/export -o minecraft.zip
 ```
