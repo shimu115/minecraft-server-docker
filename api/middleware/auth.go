@@ -23,6 +23,11 @@ func Auth(next http.Handler) http.Handler {
 		}
 
 		token := extractBearer(r)
+		// 表单提交下载时，key 可通过 form 参数传递
+		if token == "" {
+			r.ParseForm()
+			token = r.FormValue("key")
+		}
 		if token == "" || !service.ValidateAPIKey(token) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)

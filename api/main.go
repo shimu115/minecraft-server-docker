@@ -48,17 +48,15 @@ func main() {
 	// API Key 刷新
 	mux.HandleFunc("POST /api/auth/refresh", handler.RefreshKey())
 
-	// FTP 管理
-	mux.HandleFunc("POST /api/ftp/start", handler.FTPStart())
-	mux.HandleFunc("POST /api/ftp/stop", handler.FTPStop())
-	mux.HandleFunc("GET /api/ftp/status", handler.FTPStatus())
-
 	// 文件管理
 	fileHandler := handler.NewFileHandler(mcDir)
 	mux.HandleFunc("GET /api/files/list", fileHandler.List())
 	mux.HandleFunc("GET /api/files/read", fileHandler.Read())
 	mux.HandleFunc("POST /api/files/write", fileHandler.Write())
 	mux.HandleFunc("DELETE /api/files/delete", fileHandler.Delete())
+	mux.HandleFunc("POST /api/files/upload", fileHandler.Upload())
+	mux.HandleFunc("GET /api/files/download", fileHandler.Download())
+	mux.HandleFunc("POST /api/files/export", fileHandler.Export())
 
 	h := middleware.CORS(middleware.Auth(mux))
 

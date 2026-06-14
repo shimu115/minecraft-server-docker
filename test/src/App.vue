@@ -12,8 +12,9 @@ const logs = ref([])
 const logContainer = ref(null)
 const autoScroll = ref(true)
 const logTail = ref(200)
-const ftpRunning = ref(false)
-const ftpPort = ref(21)
+const selectedFiles = ref(new Set())
+const exportFormat = ref('zip')
+const uploading = ref(false)
 let sseAbort = null
 
 // ===== File Browser =====
@@ -141,21 +142,43 @@ function scrollToBottom() {
 function restartLogStream() { stopLogStream(); startLogStream() }
 function clearLogs() { logs.value = [] }
 
-// ===== FTP =====
-async function ftpStart() {
-  const data = await api('POST', '/api/ftp/start', { port: ftpPort.value, username: 'root', password: 'minecraft' })
-  commandResult.value = JSON.stringify(data, null, 2)
-  fetchFTPStatus()
+// ===== File Browser (multi-select) =====
+function toggleSelect(f) { const s = selectedFiles.value; s.has(f.path) ? s.delete(f.path) : s.add(f.path); selectedFiles.value = new Set(s) }
+function toggleSelectAll() {
+  if (selectedFiles.value.size === files.value.length) { selectedFiles.value = new Set() }
+  else { selectedFiles.value = new Set(files.value.map(f => f.path)) }
 }
-async function ftpStop() {
-  commandResult.value = JSON.stringify(await api('POST', '/api/ftp/stop'), null, 2)
-  fetchFTPStatus()
+async function downloadSelected() {
+  for (const path of selectedFiles.value) {
+    const url = (baseURL.value || '') + `/api/files/download?path=${encodeURIComponent(path)}`
+    const a = document.createElement('a'); a.href = url; a.download = path.split('/').pop(); a.click()
+  }
 }
-async function fetchFTPStatus() {
+async function deleteSelected() {
+  if (!confirm(`确定删除 ${selectedFiles.value.size} 个文件?`)) return
+  for (const path of selectedFiles.value) { await api('DELETE', `/api/files/delete?path=${encodeURIComponent(path)}`) }
+  selectedFiles.value = new Set(); fetchFiles()
+}
+async function uploadFile(e) {
+  const file = e.target.files[0]; if (!file) return
+  uploading.value = true
+  const form = new FormData(); form.append('file', file)
+  if (filePath.value) form.append('dir', filePath.value)
   try {
-    const data = await api('GET', '/api/ftp/status')
-    if (data.code === 200 && data.data) { ftpRunning.value = data.data.running; if (data.data.port) ftpPort.value = data.data.port }
+    const url = (baseURL.value || '') + '/api/files/upload'
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: headers().Authorization }, body: form })
+    commandResult.value = JSON.stringify(await res.json(), null, 2)
+    fetchFiles()
   } catch {}
+  uploading.value = false
+}
+function exportFiles() {
+  const form = document.createElement('form')
+  form.method = 'POST'; form.action = (baseURL.value || '') + '/api/files/export'
+  form.target = '_blank'
+  const f1 = document.createElement('input'); f1.name = 'format'; f1.value = exportFormat.value; form.appendChild(f1)
+  const f2 = document.createElement('input'); f2.name = 'key'; f2.value = apiKey.value; form.appendChild(f2)
+  document.body.appendChild(form); form.submit(); document.body.removeChild(form)
 }
 
 // ===== File Browser =====
@@ -248,34 +271,40 @@ onUnmounted(() => { stopLogStream() })
           <pre v-if="commandResult" class="result">{{ commandResult }}</pre>
         </section>
 
-        <!-- FTP -->
-        <section class="card">
-          <h2>&#x1F4C1; FTP 管理</h2>
-          <div class="row">
-            <label>端口</label>
-            <input v-model.number="ftpPort" type="number" class="input short" />
-            <button @click="ftpStart" class="btn success" :disabled="ftpRunning">启动 FTP</button>
-            <button @click="ftpStop" class="btn danger" :disabled="!ftpRunning">停止 FTP</button>
-            <span class="badge" :class="ftpRunning ? 'ok' : 'err'">{{ ftpRunning ? '&#x25CF; 运行中' : '&#x25CB; 已停止' }}</span>
-          </div>
-        </section>
-
         <!-- 文件管理 -->
         <section class="card">
           <h2>&#x1F4C4; 文件管理</h2>
           <div class="row" style="margin-bottom:10px">
             <span v-if="fileError" class="red" style="font-size:12px">{{ fileError }}</span>
-            <button @click="fetchFiles" class="btn primary sm">&#x21BB; 刷新</button>
-            <button v-if="filePath" @click="goUp" class="btn sm">&#x2190; 上级</button>
+            <button @click="fetchFiles" class="btn primary sm">&#x21BB;</button>
+            <button v-if="filePath" @click="goUp" class="btn sm">&#x2190;</button>
             <span class="file-breadcrumb">./{{ filePath || '' }}</span>
+            <label class="btn sm" style="cursor:pointer;margin-left:auto" :class="{ primary: uploading }">
+              {{ uploading ? '...' : '&#x2B06;' }}
+              <input type="file" @change="uploadFile" style="display:none" />
+            </label>
+            <button v-if="selectedFiles.size" @click="downloadSelected" class="btn sm success">&#x2B07;</button>
+            <button v-if="selectedFiles.size" @click="deleteSelected" class="btn sm danger">&#x2716;</button>
+            <select v-model="exportFormat" class="input" style="flex:0 0 auto;width:auto;min-width:60px">
+              <option value="zip">zip</option>
+              <option value="tar.gz">tar.gz</option>
+            </select>
+            <button @click="exportFiles" class="btn sm warn">导出</button>
           </div>
           <div class="file-layout">
             <div class="file-list">
-              <div v-for="f in files" :key="f.path" class="file-row" :class="{ active: selectedFile?.path === f.path }" @click="openFile(f)">
-                <span>{{ f.isDir ? '&#x1F4C1;' : '&#x1F4C4;' }}</span>
-                <span class="file-name">{{ f.name }}</span>
-                <span class="file-size" v-if="!f.isDir">{{ formatSize(f.size) }}</span>
-                <button @click.stop="deleteFile(f)" class="btn sm danger" style="margin-left:auto">&#x2716;</button>
+              <div class="file-row" @click="toggleSelectAll" style="color:#8b949e">
+                <input type="checkbox" :checked="selectedFiles.size === files.length && files.length > 0" style="pointer-events:none" />
+                <span class="file-name">全选</span>
+              </div>
+              <div v-for="f in files" :key="f.path" class="file-row" :class="{ active: selectedFile?.path === f.path }">
+                <input type="checkbox" :checked="selectedFiles.has(f.path)" @click.stop="toggleSelect(f)" />
+                <span @click="openFile(f)" style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer">
+                  <span>{{ f.isDir ? '&#x1F4C1;' : '&#x1F4C4;' }}</span>
+                  <span class="file-name">{{ f.name }}</span>
+                  <span class="file-size" v-if="!f.isDir">{{ formatSize(f.size) }}</span>
+                </span>
+                <button @click.stop="deleteFile(f)" class="btn sm danger">&#x2716;</button>
               </div>
               <div v-if="files.length === 0" class="log-empty">目录为空</div>
             </div>

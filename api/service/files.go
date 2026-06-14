@@ -1,7 +1,11 @@
 package service
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -102,6 +106,126 @@ func WriteFile(baseDir, relPath, content string) error {
 	}
 	os.MkdirAll(filepath.Dir(fullPath), 0755)
 	return os.WriteFile(fullPath, []byte(content), 0644)
+}
+
+// SaveUploadedFile 保存上传的文件
+func SaveUploadedFile(baseDir, filename string, src io.Reader) error {
+	fullPath, err := safePath(baseDir, filename)
+	if err != nil {
+		return err
+	}
+	os.MkdirAll(filepath.Dir(fullPath), 0755)
+	dst, err := os.Create(fullPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = io.Copy(dst, src)
+	return err
+}
+
+// OpenFile 打开文件用于下载
+func OpenFile(baseDir, relPath string) (*os.File, os.FileInfo, error) {
+	fullPath, err := safePath(baseDir, relPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err := os.Open(fullPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, info, nil
+}
+
+// ExportDir 直接写压缩文件到 writer
+func ExportDir(baseDir, format string, w io.Writer) error {
+	base, err := resolveBase(baseDir)
+	if err != nil {
+		return err
+	}
+	switch format {
+	case "zip":
+		return writeZip(base, w)
+	case "tar.gz":
+		return writeTarGz(base, w)
+	default:
+		return fmt.Errorf("unsupported format: %s (use zip or tar.gz)", format)
+	}
+}
+
+func writeZip(base string, w io.Writer) error {
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	return filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(base, path)
+		if rel == "." {
+			return nil
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = rel
+		header.Method = zip.Deflate
+		if info.IsDir() {
+			header.Name += "/"
+			_, err = zw.CreateHeader(header)
+			return err
+		}
+		entry, err := zw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(entry, f)
+		return err
+	})
+}
+
+func writeTarGz(base string, w io.Writer) error {
+	gw := gzip.NewWriter(w)
+	defer gw.Close()
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+	return filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(base, path)
+		if rel == "." {
+			return nil
+		}
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = rel
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(tw, f)
+			return err
+		}
+		return nil
+	})
 }
 
 // DeleteFile 删除文件或目录

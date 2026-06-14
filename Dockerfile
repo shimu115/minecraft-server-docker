@@ -14,7 +14,7 @@ RUN mkdir -p /minecraft
 
 # 安装运行依赖
 RUN apt update \
- && apt install -y bash wget screen tar vsftpd \
+ && apt install -y bash wget screen tar \
  && rm -rf /var/lib/apt/lists/*
 
 # 拷贝启动脚本
@@ -29,8 +29,8 @@ COPY --from=builder /mc-api /usr/local/bin/mc-api
 # 工作目录
 WORKDIR /minecraft
 
-# Minecraft 默认端口 + API 端口 + FTP 端口 + FTP 被动模式端口范围
-EXPOSE 25565 25560 21 30000-30009
+# Minecraft 默认端口 + API 端口
+EXPOSE 25565 25560
 
 # 启动命令
 CMD ["/start.sh"]
