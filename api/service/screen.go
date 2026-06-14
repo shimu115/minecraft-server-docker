@@ -13,14 +13,26 @@ import (
 
 const ScreenName = "mcserver"
 
-// SessionExists 检查 screen 会话是否存在
+// SessionExists 检查 screen 会话是否存在且存活（非 Dead 状态）
 func SessionExists() bool {
 	cmd := exec.Command("screen", "-ls")
 	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), ScreenName)
+	output := string(out)
+	// 检查是否包含会话名且非 Dead 状态
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, ScreenName) && !strings.Contains(line, "Dead") {
+			return true
+		}
+	}
+	return false
+}
+
+// CleanupDeadSessions 清理残留的死 screen 会话
+func CleanupDeadSessions() {
+	exec.Command("screen", "-wipe").Run()
 }
 
 // SendCommand 向 MC 服务端发送指令
