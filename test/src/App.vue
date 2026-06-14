@@ -39,44 +39,35 @@ async function api(method, path, body) {
   return res.json()
 }
 
-// ===== API Key =====
+// ===== Connection =====
 function saveApiKey() {
   localStorage.setItem('mc_api_key', apiKey.value)
   localStorage.setItem('mc_api_url', baseURL.value)
   checkConnection()
 }
 
-// ===== Connection =====
 async function checkConnection() {
   try {
     const data = await api('GET', '/api/health')
     connected.value = data.code === 200
     if (connected.value) { fetchStatus(); fetchFiles() }
-  } catch {
-    connected.value = false
-  }
+  } catch { connected.value = false }
 }
 
 // ===== Server Controls =====
 async function fetchStatus() {
-  try {
-    const data = await api('GET', '/api/server/status')
-    if (data.code === 200) status.value = data.data
-  } catch { /* ignore */ }
+  try { const data = await api('GET', '/api/server/status'); if (data.code === 200) status.value = data.data } catch {}
 }
-
 async function serverStart() {
   const data = await api('POST', '/api/server/start')
   commandResult.value = JSON.stringify(data, null, 2)
   setTimeout(fetchStatus, 2000)
 }
-
 async function serverStop() {
   const data = await api('POST', '/api/server/stop')
   commandResult.value = JSON.stringify(data, null, 2)
   setTimeout(fetchStatus, 3000)
 }
-
 async function serverRestart() {
   const data = await api('POST', '/api/server/restart')
   commandResult.value = JSON.stringify(data, null, 2)
@@ -94,26 +85,19 @@ async function sendCommand() {
 // ===== Logs (SSE) =====
 function startLogStream() {
   stopLogStream()
-  const url = (baseURL.value || '') + `/api/logs?tail=${logTail.value}`
-  eventSource = new EventSource(url)
-
+  eventSource = new EventSource((baseURL.value || '') + `/api/logs?tail=${logTail.value}`)
   eventSource.onmessage = (e) => {
     logs.value.push(e.data)
     if (logs.value.length > 1000) logs.value.shift()
     if (autoScroll.value) scrollToBottom()
   }
-
-  eventSource.onerror = () => { /* auto-reconnect */ }
+  eventSource.onerror = () => {}
 }
 
-function stopLogStream() {
-  if (eventSource) { eventSource.close(); eventSource = null }
-}
+function stopLogStream() { if (eventSource) { eventSource.close(); eventSource = null } }
 
 function scrollToBottom() {
-  nextTick(() => {
-    if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight
-  })
+  nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
 }
 
 function clearLogs() { logs.value = [] }
@@ -124,11 +108,15 @@ async function ftpStart() {
   commandResult.value = JSON.stringify(data, null, 2)
   fetchFTPStatus()
 }
-
 async function ftpStop() {
-  const data = await api('POST', '/api/ftp/stop')
-  commandResult.value = JSON.stringify(data, null, 2)
+  commandResult.value = JSON.stringify(await api('POST', '/api/ftp/stop'), null, 2)
   fetchFTPStatus()
+}
+async function fetchFTPStatus() {
+  try {
+    const data = await api('GET', '/api/ftp/status')
+    if (data.code === 200 && data.data) { ftpRunning.value = data.data.running; if (data.data.port) ftpPort.value = data.data.port }
+  } catch {}
 }
 
 // ===== File Browser =====
@@ -139,69 +127,29 @@ async function fetchFiles() {
     else { fileError.value = data.message || '请求失败' }
   } catch (e) { fileError.value = '连接失败: ' + e.message }
 }
-
-function enterDir(dir) {
-  filePath.value = dir
-  selectedFile.value = null
-  fileContent.value = ''
-  fileEditing.value = false
-  fetchFiles()
-}
-
-function goUp() {
-  const parts = filePath.value.split('/').filter(Boolean)
-  parts.pop()
-  filePath.value = parts.join('/')
-  selectedFile.value = null
-  fileContent.value = ''
-  fileEditing.value = false
-  fetchFiles()
-}
-
+function enterDir(dir) { filePath.value = dir; selectedFile.value = null; fileContent.value = ''; fileEditing.value = false; fetchFiles() }
+function goUp() { const p = filePath.value.split('/').filter(Boolean); p.pop(); filePath.value = p.join('/'); selectedFile.value = null; fileContent.value = ''; fileEditing.value = false; fetchFiles() }
 async function openFile(f) {
   if (f.isDir) { enterDir(f.path); return }
-  selectedFile.value = f
-  fileEditing.value = false
-  try {
-    const data = await api('GET', `/api/files/read?path=${encodeURIComponent(f.path)}`)
-    if (data.code === 200) fileContent.value = data.data.content
-  } catch { /* ignore */ }
+  selectedFile.value = f; fileEditing.value = false
+  try { const data = await api('GET', `/api/files/read?path=${encodeURIComponent(f.path)}`); if (data.code === 200) fileContent.value = data.data.content } catch {}
 }
-
 function editFile() { fileEditing.value = true }
-
 async function saveFile() {
   if (!selectedFile.value) return
-  try {
-    await api('POST', `/api/files/write?path=${encodeURIComponent(selectedFile.value.path)}`, { content: fileContent.value })
-    fileEditing.value = false
-  } catch { /* ignore */ }
+  try { await api('POST', `/api/files/write?path=${encodeURIComponent(selectedFile.value.path)}`, { content: fileContent.value }); fileEditing.value = false } catch {}
 }
-
 async function deleteFile(f) {
   if (!confirm(`确定删除 ${f.name}?`)) return
   try {
     await api('DELETE', `/api/files/delete?path=${encodeURIComponent(f.path)}`)
     if (selectedFile.value?.path === f.path) { selectedFile.value = null; fileContent.value = '' }
     fetchFiles()
-  } catch { /* ignore */ }
+  } catch {}
 }
-
-async function fetchFTPStatus() {
-  try {
-    const data = await api('GET', '/api/ftp/status')
-    if (data.code === 200 && data.data) {
-      ftpRunning.value = data.data.running
-      if (data.data.port) ftpPort.value = data.data.port
-    }
-  } catch { /* ignore */ }
-}
-
 function formatSize(bytes) {
   if (!bytes) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let s = bytes
+  const u = ['B', 'KB', 'MB', 'GB']; let i = 0, s = bytes
   while (s >= 1024 && i < u.length - 1) { s /= 1024; i++ }
   return s.toFixed(i ? 1 : 0) + ' ' + u[i]
 }
@@ -220,120 +168,130 @@ onUnmounted(() => { stopLogStream() })
       </span>
     </header>
 
-    <!-- 连接配置 -->
-    <section class="card">
-      <h2>&#x1F511; API 连接</h2>
-      <div class="row">
-        <input v-model="baseURL" placeholder="API 地址 (http://host:25560)" class="input" />
-        <input v-model="apiKey" type="password" placeholder="API Key" class="input" />
-        <button @click="saveApiKey" class="btn primary">连接</button>
+    <!-- 主布局：左面板（控制）+ 右面板（日志） -->
+    <div class="main-layout">
+      <div class="left-panel">
+        <!-- API 连接 -->
+        <section class="card">
+          <h2>&#x1F511; API 连接</h2>
+          <div class="row">
+            <input v-model="baseURL" placeholder="API 地址 (留空走代理)" class="input" />
+            <input v-model="apiKey" type="password" placeholder="API Key" class="input" />
+            <button @click="saveApiKey" class="btn primary">连接</button>
+          </div>
+        </section>
+
+        <!-- 服务端状态 -->
+        <section class="card">
+          <h2>&#x1F4CA; 服务端状态</h2>
+          <div class="status-grid">
+            <div class="stat"><label>运行状态</label><span :class="status.running ? 'green' : 'red'">{{ status.running ? '运行中' : '已停止' }}</span></div>
+            <div class="stat"><label>在线玩家</label><span>{{ status.players }}</span></div>
+            <div class="stat"><label>运行时间</label><span>{{ status.uptime || '-' }}</span></div>
+            <div class="stat"><label>版本</label><span>{{ status.version || '-' }}</span></div>
+          </div>
+          <div class="btn-group">
+            <button @click="serverStart" :disabled="status.running" class="btn success">&#x25B6; 启动</button>
+            <button @click="serverStop" :disabled="!status.running" class="btn danger">&#x25A0; 停止</button>
+            <button @click="serverRestart" :disabled="!status.running" class="btn warn">&#x21BA; 重启</button>
+            <button @click="fetchStatus" class="btn">&#x21BB; 刷新</button>
+          </div>
+        </section>
+
+        <!-- 发送指令 -->
+        <section class="card">
+          <h2>&#x2328; 发送指令</h2>
+          <div class="row">
+            <input v-model="command" @keyup.enter="sendCommand" placeholder="例如: say Hello" class="input" />
+            <button @click="sendCommand" class="btn primary">发送</button>
+          </div>
+          <pre v-if="commandResult" class="result">{{ commandResult }}</pre>
+        </section>
+
+        <!-- FTP -->
+        <section class="card">
+          <h2>&#x1F4C1; FTP 管理</h2>
+          <div class="row">
+            <label>端口</label>
+            <input v-model.number="ftpPort" type="number" class="input short" />
+            <button @click="ftpStart" class="btn success" :disabled="ftpRunning">启动 FTP</button>
+            <button @click="ftpStop" class="btn danger" :disabled="!ftpRunning">停止 FTP</button>
+            <span class="badge" :class="ftpRunning ? 'ok' : 'err'">{{ ftpRunning ? '&#x25CF; 运行中' : '&#x25CB; 已停止' }}</span>
+          </div>
+        </section>
+
+        <!-- 文件管理 -->
+        <section class="card">
+          <h2>&#x1F4C4; 文件管理</h2>
+          <div class="row" style="margin-bottom:10px">
+            <span v-if="fileError" class="red" style="font-size:12px">{{ fileError }}</span>
+            <button @click="fetchFiles" class="btn primary sm">&#x21BB; 刷新</button>
+            <button v-if="filePath" @click="goUp" class="btn sm">&#x2190; 上级</button>
+            <span class="file-breadcrumb">./{{ filePath || '' }}</span>
+          </div>
+          <div class="file-layout">
+            <div class="file-list">
+              <div v-for="f in files" :key="f.path" class="file-row" :class="{ active: selectedFile?.path === f.path }" @click="openFile(f)">
+                <span>{{ f.isDir ? '&#x1F4C1;' : '&#x1F4C4;' }}</span>
+                <span class="file-name">{{ f.name }}</span>
+                <span class="file-size" v-if="!f.isDir">{{ formatSize(f.size) }}</span>
+                <button @click.stop="deleteFile(f)" class="btn sm danger" style="margin-left:auto">&#x2716;</button>
+              </div>
+              <div v-if="files.length === 0" class="log-empty">目录为空</div>
+            </div>
+            <div class="file-preview" v-if="selectedFile">
+              <div class="row" style="margin-bottom:6px">
+                <strong>{{ selectedFile.name }}</strong>
+                <span class="hint">{{ formatSize(selectedFile.size) }}</span>
+                <button v-if="!fileEditing" @click="editFile" class="btn sm">编辑</button>
+                <button v-if="fileEditing" @click="saveFile" class="btn sm success">保存</button>
+              </div>
+              <textarea v-if="fileEditing" v-model="fileContent" class="file-editor"></textarea>
+              <pre v-else class="file-content">{{ fileContent }}</pre>
+            </div>
+            <div class="file-preview" v-else>
+              <div class="log-empty">点击文件查看内容</div>
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
 
-    <!-- 状态 & 指令 -->
-    <div class="grid">
-      <section class="card">
-        <h2>&#x1F4CA; 服务端状态</h2>
-        <div class="status-grid">
-          <div class="stat"><label>运行状态</label><span :class="status.running ? 'green' : 'red'">{{ status.running ? '运行中' : '已停止' }}</span></div>
-          <div class="stat"><label>在线玩家</label><span>{{ status.players }}</span></div>
-          <div class="stat"><label>运行时间</label><span>{{ status.uptime || '-' }}</span></div>
-          <div class="stat"><label>版本</label><span>{{ status.version || '-' }}</span></div>
-        </div>
-        <div class="btn-group">
-          <button @click="serverStart" :disabled="status.running" class="btn success">&#x25B6; 启动</button>
-          <button @click="serverStop" :disabled="!status.running" class="btn danger">&#x25A0; 停止</button>
-          <button @click="serverRestart" :disabled="!status.running" class="btn warn">&#x21BA; 重启</button>
-          <button @click="fetchStatus" class="btn">&#x21BB; 刷新</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>&#x2328; 发送指令</h2>
-        <div class="row">
-          <input v-model="command" @keyup.enter="sendCommand" placeholder="例如: say Hello" class="input" />
-          <button @click="sendCommand" class="btn primary">发送</button>
-        </div>
-        <pre v-if="commandResult" class="result">{{ commandResult }}</pre>
-      </section>
+      <!-- 日志 -->
+      <div class="right-panel">
+        <section class="card log-card">
+          <h2>&#x1F4DC; 实时日志</h2>
+          <div class="log-toolbar">
+            <label>Tail <input v-model.number="logTail" type="number" class="input short" style="width:60px" /></label>
+            <label><input type="checkbox" v-model="autoScroll" /> 自动滚动</label>
+            <button @click="clearLogs" class="btn sm">清空</button>
+            <span v-if="logs.length" class="hint">{{ logs.length }} 行</span>
+          </div>
+          <div ref="logContainer" class="log-viewer log-viewer-tall">
+            <div v-for="(line, i) in logs" :key="i" class="log-line">{{ line }}</div>
+            <div v-if="logs.length === 0" class="log-empty">等待日志...</div>
+          </div>
+        </section>
+      </div>
     </div>
-
-    <!-- FTP -->
-    <section class="card">
-      <h2>&#x1F4C1; FTP 管理</h2>
-      <div class="row">
-        <label>端口</label>
-        <input v-model.number="ftpPort" type="number" class="input short" />
-        <button @click="ftpStart" class="btn success" :disabled="ftpRunning">启动 FTP</button>
-        <button @click="ftpStop" class="btn danger" :disabled="!ftpRunning">停止 FTP</button>
-        <span class="badge" :class="ftpRunning ? 'ok' : 'err'">
-          {{ ftpRunning ? '&#x25CF; 运行中' : '&#x25CB; 已停止' }}
-        </span>
-      </div>
-    </section>
-
-    <!-- 文件管理 -->
-    <section class="card">
-      <h2>&#x1F4C4; 文件管理</h2>
-      <div class="row" style="margin-bottom:10px">
-        <span v-if="fileError" class="red" style="font-size:12px">{{ fileError }}</span>
-        <button @click="fetchFiles" class="btn primary sm">&#x21BB; 刷新</button>
-        <button v-if="filePath" @click="goUp" class="btn sm">&#x2190; 上级</button>
-        <span class="file-breadcrumb">./{{ filePath || '' }}</span>
-      </div>
-      <div class="file-layout">
-        <div class="file-list">
-          <div v-for="f in files" :key="f.path" class="file-row" :class="{ active: selectedFile?.path === f.path }" @click="openFile(f)">
-            <span>{{ f.isDir ? '&#x1F4C1;' : '&#x1F4C4;' }}</span>
-            <span class="file-name">{{ f.name }}</span>
-            <span class="file-size" v-if="!f.isDir">{{ formatSize(f.size) }}</span>
-            <button @click.stop="deleteFile(f)" class="btn sm danger" style="margin-left:auto">&#x2716;</button>
-          </div>
-          <div v-if="files.length === 0" class="log-empty">目录为空</div>
-        </div>
-        <div class="file-preview" v-if="selectedFile">
-          <div class="row" style="margin-bottom:6px">
-            <strong>{{ selectedFile.name }}</strong>
-            <span class="hint">{{ formatSize(selectedFile.size) }}</span>
-            <button v-if="!fileEditing" @click="editFile" class="btn sm">编辑</button>
-            <button v-if="fileEditing" @click="saveFile" class="btn sm success">保存</button>
-          </div>
-          <textarea v-if="fileEditing" v-model="fileContent" class="file-editor"></textarea>
-          <pre v-else class="file-content">{{ fileContent }}</pre>
-        </div>
-        <div class="file-preview" v-else>
-          <div class="log-empty">点击文件查看内容</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 日志 -->
-    <section class="card">
-      <h2>&#x1F4DC; 实时日志</h2>
-      <div class="log-toolbar">
-        <label>Tail <input v-model.number="logTail" type="number" class="input short" style="width:60px" /></label>
-        <label><input type="checkbox" v-model="autoScroll" /> 自动滚动</label>
-        <button @click="clearLogs" class="btn sm">清空</button>
-        <span v-if="logs.length" class="hint">{{ logs.length }} 行</span>
-      </div>
-      <div ref="logContainer" class="log-viewer">
-        <div v-for="(line, i) in logs" :key="i" class="log-line">{{ line }}</div>
-        <div v-if="logs.length === 0" class="log-empty">等待日志...</div>
-      </div>
-    </section>
   </div>
 </template>
 
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; }
-.app { max-width: 1100px; margin: 0 auto; padding: 20px; }
+.app { padding: 20px 40px; }
 .header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .header h1 { font-size: 22px; color: #58a6ff; }
 .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .card h2 { font-size: 15px; color: #8b949e; margin-bottom: 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.main-layout { display: grid; grid-template-columns: 420px minmax(500px, 1fr); gap: 20px; }
+.left-panel { min-width: 0; max-width: 420px; }
+.right-panel { min-width: 400px; }
+.log-card { height: 100%; display: flex; flex-direction: column; }
+.log-card h2 { flex-shrink: 0; }
+.log-card .log-toolbar { flex-shrink: 0; }
+.log-card .log-viewer-tall { flex: 1; height: auto !important; }
 .badge { font-size: 13px; padding: 2px 10px; border-radius: 12px; }
 .badge.ok { background: #1a3d1a; color: #3fb950; }
 .badge.err { background: #3d1a1a; color: #f85149; }
@@ -373,5 +331,5 @@ body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; 
 .file-preview { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
 .file-content { max-height: 250px; overflow: auto; font-size: 12px; font-family: monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
 .file-editor { width: 100%; height: 250px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 8px; font-size: 12px; font-family: monospace; resize: vertical; }
-@media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .file-layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .main-layout { grid-template-columns: 1fr; } .log-card { height: 500px; } }
 </style>
