@@ -304,6 +304,121 @@ POST /api/auth/refresh
 
 文件操作限定在工作目录范围内，无法访问上级目录。
 
+#### 9.1 删除文件
+
+```
+DELETE /api/files/delete?path=<相对路径>
+```
+
+**认证**：需要
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| path | string | 文件/目录相对路径（必填） |
+
+**响应**：
+
+```json
+{"code":200,"status":"ok","message":"Deleted"}
+```
+
+#### 9.2 上传文件
+
+```
+POST /api/files/upload
+```
+
+**认证**：需要
+
+**说明**：multipart/form-data 方式上传，支持子目录。
+
+**表单字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| file | file | 上传的文件（必填） |
+| dir | string | 目标子目录（可选，相对于工作目录） |
+
+**响应**：
+
+```json
+{
+  "code": 200,
+  "status": "ok",
+  "message": "File uploaded",
+  "data": {"filename": "mods/example.jar"}
+}
+```
+
+**示例**：
+
+```bash
+curl -X POST -H "Authorization: Bearer <key>" \
+  -F "file=@example.jar" \
+  -F "dir=mods" \
+  http://localhost:25560/api/files/upload
+```
+
+#### 9.3 下载文件
+
+```
+GET /api/files/download?path=<相对路径>
+```
+
+**认证**：需要
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| path | string | 文件相对路径（必填） |
+
+**说明**：流式返回文件内容，响应头包含 `Content-Disposition: attachment`，浏览器自动触发下载。
+
+**示例**：
+
+```bash
+curl -H "Authorization: Bearer <key>" \
+  "http://localhost:25560/api/files/download?path=server.jar" \
+  -o server.jar
+```
+
+#### 9.4 导出目录
+
+```
+POST /api/files/export
+```
+
+**认证**：需要
+
+**说明**：将整个工作目录压缩为 zip 或 tar.gz 文件。支持两种请求方式：
+- JSON body：`{"format":"zip"}`
+- 表单提交：`format=zip&key=<api-key>`（用于浏览器表单下载）
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| format | string | 压缩格式：`zip` 或 `tar.gz`（必填） |
+
+**说明**：响应为二进制流，`Content-Disposition: attachment`，浏览器自动下载。
+
+**示例**：
+
+```bash
+# JSON 方式（curl）
+curl -X POST -H "Authorization: Bearer <key>" \
+  -H "Content-Type: application/json" \
+  -d '{"format":"tar.gz"}' \
+  http://localhost:25560/api/files/export \
+  -o minecraft.tar.gz
+
+# 表单方式（浏览器）
+# POST /api/files/export  body: format=zip&key=<api-key>
+```
+
 #### 10.1 列出目录
 
 ```
@@ -396,121 +511,6 @@ POST /api/files/write?path=<相对路径>
   "status": "ok",
   "message": "File saved"
 }
-```
-
-#### 9.5 删除文件
-
-```
-DELETE /api/files/delete?path=<相对路径>
-```
-
-**认证**：需要
-
-**请求参数**：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| path | string | 文件/目录相对路径（必填） |
-
-**响应**：
-
-```json
-{"code":200,"status":"ok","message":"Deleted"}
-```
-
-#### 9.6 上传文件
-
-```
-POST /api/files/upload
-```
-
-**认证**：需要
-
-**说明**：multipart/form-data 方式上传，支持子目录。
-
-**表单字段**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| file | file | 上传的文件（必填） |
-| dir | string | 目标子目录（可选，相对于工作目录） |
-
-**响应**：
-
-```json
-{
-  "code": 200,
-  "status": "ok",
-  "message": "File uploaded",
-  "data": {"filename": "mods/example.jar"}
-}
-```
-
-**示例**：
-
-```bash
-curl -X POST -H "Authorization: Bearer <key>" \
-  -F "file=@example.jar" \
-  -F "dir=mods" \
-  http://localhost:25560/api/files/upload
-```
-
-#### 9.7 下载文件
-
-```
-GET /api/files/download?path=<相对路径>
-```
-
-**认证**：需要
-
-**请求参数**：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| path | string | 文件相对路径（必填） |
-
-**说明**：流式返回文件内容，响应头包含 `Content-Disposition: attachment`，浏览器自动触发下载。
-
-**示例**：
-
-```bash
-curl -H "Authorization: Bearer <key>" \
-  "http://localhost:25560/api/files/download?path=server.jar" \
-  -o server.jar
-```
-
-#### 9.8 导出目录
-
-```
-POST /api/files/export
-```
-
-**认证**：需要
-
-**说明**：将整个工作目录压缩为 zip 或 tar.gz 文件。支持两种请求方式：
-- JSON body：`{"format":"zip"}`
-- 表单提交：`format=zip&key=<api-key>`（用于浏览器表单下载）
-
-**请求参数**：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| format | string | 压缩格式：`zip` 或 `tar.gz`（必填） |
-
-**说明**：响应为二进制流，`Content-Disposition: attachment`，浏览器自动下载。
-
-**示例**：
-
-```bash
-# JSON 方式（curl）
-curl -X POST -H "Authorization: Bearer <key>" \
-  -H "Content-Type: application/json" \
-  -d '{"format":"tar.gz"}' \
-  http://localhost:25560/api/files/export \
-  -o minecraft.tar.gz
-
-# 表单方式（浏览器）
-# POST /api/files/export  body: format=zip&key=<api-key>
 ```
 
 ---
