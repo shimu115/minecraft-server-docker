@@ -54,7 +54,7 @@ func (h *logHandler) Stream() http.HandlerFunc {
 		}
 
 		// 心跳：每 15 秒发送 comment 防止代理/浏览器断开
-		go heartbeat(r.Context().Done(), flusher)
+		go heartbeat(r.Context().Done(), w, flusher)
 
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
@@ -87,7 +87,7 @@ func (h *logHandler) Stream() http.HandlerFunc {
 }
 
 // heartbeat 定期发送 SSE comment 保持连接
-func heartbeat(done <-chan struct{}, flusher http.Flusher) {
+func heartbeat(done <-chan struct{}, w http.ResponseWriter, flusher http.Flusher) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -95,10 +95,8 @@ func heartbeat(done <-chan struct{}, flusher http.Flusher) {
 		case <-done:
 			return
 		case <-ticker.C:
-			fmt.Fprintf(flusher, ": heartbeat\n\n")
-			if f, ok := flusher.(http.Flusher); ok {
-				f.Flush()
-			}
+			fmt.Fprintf(w, ": heartbeat\n\n")
+			flusher.Flush()
 		}
 	}
 }

@@ -16,7 +16,7 @@ import (
 
 func main() {
 	port := getEnv("API_PORT", "25560")
-	mcDir := getEnv("MC_DIR", "/minecraft")
+	mcDir := getEnv("MC_DIR", ".")
 	logPath := filepath.Join(mcDir, "logs", "latest.log")
 
 	// 初始化 API Key
@@ -44,6 +44,11 @@ func main() {
 
 	// 发送指令
 	mux.HandleFunc("POST /api/command", handler.Command())
+
+	// FTP 管理
+	mux.HandleFunc("POST /api/ftp/start", handler.FTPStart())
+	mux.HandleFunc("POST /api/ftp/stop", handler.FTPStop())
+	mux.HandleFunc("GET /api/ftp/status", handler.FTPStatus())
 
 	h := middleware.Auth(middleware.CORS(mux))
 

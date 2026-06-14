@@ -5,6 +5,8 @@ services:
     ports:
       - "25565:25565"
       - "25560:25560"
+      - "2121:21"
+      - "30000-30009:30000-30009"
     environment:
       JAVA_VERSION: "8"
       SERVER_TYPE: forge
