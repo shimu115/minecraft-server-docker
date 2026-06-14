@@ -45,6 +45,9 @@ func main() {
 	// 发送指令
 	mux.HandleFunc("POST /api/command", handler.Command())
 
+	// API Key 刷新
+	mux.HandleFunc("POST /api/auth/refresh", handler.RefreshKey())
+
 	// FTP 管理
 	mux.HandleFunc("POST /api/ftp/start", handler.FTPStart())
 	mux.HandleFunc("POST /api/ftp/stop", handler.FTPStop())
@@ -72,6 +75,9 @@ func main() {
 	if getEnv("AUTO_START", "true") == "true" {
 		go func() {
 			time.Sleep(2 * time.Second) // 等 HTTP 服务就绪
+
+			// 清理容器重启后残留的死会话
+			service.CleanupDeadSessions()
 
 			if service.SessionExists() {
 				log.Printf("[mc-api] MC server already running, skip auto-start")

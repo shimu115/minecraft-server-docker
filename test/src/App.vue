@@ -39,6 +39,19 @@ async function api(method, path, body) {
   return res.json()
 }
 
+async function refreshKey() {
+  try {
+    const data = await api('POST', '/api/auth/refresh')
+    if (data.code === 200 && data.data?.api_key) {
+      apiKey.value = data.data.api_key
+      localStorage.setItem('mc_api_key', apiKey.value)
+      stopLogStream()
+      startLogStream()
+    }
+    commandResult.value = JSON.stringify(data, null, 2)
+  } catch {}
+}
+
 // ===== Connection =====
 function saveApiKey() {
   localStorage.setItem('mc_api_key', apiKey.value)
@@ -125,6 +138,7 @@ function scrollToBottom() {
   nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
 }
 
+function restartLogStream() { stopLogStream(); startLogStream() }
 function clearLogs() { logs.value = [] }
 
 // ===== FTP =====
@@ -203,6 +217,7 @@ onUnmounted(() => { stopLogStream() })
             <input v-model="baseURL" placeholder="API 地址 (留空走代理)" class="input" />
             <input v-model="apiKey" type="password" placeholder="API Key" class="input" />
             <button @click="saveApiKey" class="btn primary">连接</button>
+            <button @click="refreshKey" class="btn warn sm">刷新 Key</button>
           </div>
         </section>
 
@@ -289,6 +304,7 @@ onUnmounted(() => { stopLogStream() })
             <label>Tail <input v-model.number="logTail" type="number" class="input short" style="width:60px" /></label>
             <label><input type="checkbox" v-model="autoScroll" /> 自动滚动</label>
             <button @click="clearLogs" class="btn sm">清空</button>
+            <button @click="restartLogStream" class="btn sm">刷新</button>
             <span v-if="logs.length" class="hint">{{ logs.length }} 行</span>
           </div>
           <div ref="logContainer" class="log-viewer log-viewer-tall">

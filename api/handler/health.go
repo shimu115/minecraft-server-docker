@@ -40,6 +40,23 @@ func writeError(w http.ResponseWriter, message string, code int) {
 	})
 }
 
+// RefreshKey 刷新 API Key
+func RefreshKey() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key, err := service.RefreshAPIKey()
+		if err != nil {
+			writeError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, model.APIResponse{
+			Code:    http.StatusOK,
+			Status:  "ok",
+			Message: "API Key refreshed",
+			Data:    map[string]string{"api_key": key},
+		})
+	}
+}
+
 func writeOK(w http.ResponseWriter, message string) {
 	writeJSON(w, model.APIResponse{
 		Code:    http.StatusOK,

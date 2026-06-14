@@ -69,6 +69,22 @@ func parseAPIKey(content string) string {
 	return ""
 }
 
+// RefreshAPIKey 刷新 API Key
+func RefreshAPIKey() (string, error) {
+	keyPath := filepath.Join(authDir, authFile)
+	key := generateUUID()
+	content := fmt.Sprintf("api-key=%s\n", key)
+	if err := os.WriteFile(keyPath, []byte(content), 0600); err != nil {
+		return "", fmt.Errorf("failed to write api key: %w", err)
+	}
+
+	log.Printf("[mc-api] ========================================")
+	log.Printf("[mc-api] API Key refreshed: %s", key)
+	log.Printf("[mc-api] ========================================")
+
+	return key, nil
+}
+
 // generateUUID 生成 UUID v4 格式字符串
 func generateUUID() string {
 	b := make([]byte, 16)
