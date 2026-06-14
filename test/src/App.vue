@@ -14,7 +14,7 @@ const autoScroll = ref(true)
 const logTail = ref(200)
 const ftpRunning = ref(false)
 const ftpPort = ref(21)
-let eventSource = null
+let sseAbort = null
 
 // ===== File Browser =====
 const filePath = ref('')
@@ -50,7 +50,7 @@ async function checkConnection() {
   try {
     const data = await api('GET', '/api/health')
     connected.value = data.code === 200
-    if (connected.value) { fetchStatus(); fetchFiles() }
+    if (connected.value) { fetchStatus(); fetchFiles(); startLogStream() }
   } catch { connected.value = false }
 }
 
@@ -83,18 +83,43 @@ async function sendCommand() {
 }
 
 // ===== Logs (SSE) =====
-function startLogStream() {
+async function startLogStream() {
   stopLogStream()
-  eventSource = new EventSource((baseURL.value || '') + `/api/logs?tail=${logTail.value}`)
-  eventSource.onmessage = (e) => {
-    logs.value.push(e.data)
-    if (logs.value.length > 1000) logs.value.shift()
-    if (autoScroll.value) scrollToBottom()
+  const url = (baseURL.value || '') + `/api/logs?tail=${logTail.value}`
+  const controller = new AbortController()
+  sseAbort = controller
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: headers(),
+    })
+    if (!res.ok) return
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          logs.value.push(line.slice(6))
+          if (logs.value.length > 1000) logs.value.shift()
+        }
+      }
+      if (autoScroll.value) scrollToBottom()
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') console.error('SSE error:', e)
   }
-  eventSource.onerror = () => {}
 }
 
-function stopLogStream() { if (eventSource) { eventSource.close(); eventSource = null } }
+function stopLogStream() { if (sseAbort) { sseAbort.abort(); sseAbort = null } }
 
 function scrollToBottom() {
   nextTick(() => { if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight })
@@ -285,13 +310,13 @@ body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; 
 .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .card h2 { font-size: 15px; color: #8b949e; margin-bottom: 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.main-layout { display: grid; grid-template-columns: 420px minmax(500px, 1fr); gap: 20px; }
-.left-panel { min-width: 0; max-width: 420px; }
+.main-layout { display: grid; grid-template-columns: 420px minmax(500px, 1fr); gap: 20px; height: calc(100vh - 120px); }
+.left-panel { min-width: 0; max-width: 420px; overflow-y: auto; }
 .right-panel { min-width: 400px; }
-.log-card { height: 100%; display: flex; flex-direction: column; }
+.log-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .log-card h2 { flex-shrink: 0; }
 .log-card .log-toolbar { flex-shrink: 0; }
-.log-card .log-viewer-tall { flex: 1; height: auto !important; }
+.log-card .log-viewer-tall { flex: 1; min-height: 0; overflow-y: auto; }
 .badge { font-size: 13px; padding: 2px 10px; border-radius: 12px; }
 .badge.ok { background: #1a3d1a; color: #3fb950; }
 .badge.err { background: #3d1a1a; color: #f85149; }

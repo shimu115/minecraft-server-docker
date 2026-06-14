@@ -17,7 +17,6 @@ var skipAuthPaths = map[string]bool{
 // Auth 认证中间件
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 健康检查放行
 		if skipAuthPaths[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
@@ -39,7 +38,6 @@ func Auth(next http.Handler) http.Handler {
 	})
 }
 
-// extractBearer 提取 Bearer token
 func extractBearer(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
