@@ -1,0 +1,258 @@
+<script setup>
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+
+// ===== State =====
+const apiKey = ref(localStorage.getItem('mc_api_key') || '')
+const baseURL = ref(localStorage.getItem('mc_api_url') || '')
+const connected = ref(false)
+const status = ref({ running: false, players: 0, uptime: '', version: '' })
+const command = ref('')
+const commandResult = ref('')
+const logs = ref([])
+const logContainer = ref(null)
+const autoScroll = ref(true)
+const logTail = ref(200)
+const ftpRunning = ref(false)
+const ftpPort = ref(21)
+let eventSource = null
+
+// ===== Helpers =====
+function headers() {
+  const h = { 'Content-Type': 'application/json' }
+  if (apiKey.value) h['Authorization'] = `Bearer ${apiKey.value}`
+  return h
+}
+
+async function api(method, path, body) {
+  const url = (baseURL.value || '') + path
+  const opts = { method, headers: headers() }
+  if (body) opts.body = JSON.stringify(body)
+  const res = await fetch(url, opts)
+  return res.json()
+}
+
+// ===== API Key =====
+function saveApiKey() {
+  localStorage.setItem('mc_api_key', apiKey.value)
+  localStorage.setItem('mc_api_url', baseURL.value)
+  checkConnection()
+}
+
+// ===== Connection =====
+async function checkConnection() {
+  try {
+    const data = await api('GET', '/api/health')
+    connected.value = data.code === 200
+    if (connected.value) fetchStatus()
+  } catch {
+    connected.value = false
+  }
+}
+
+// ===== Server Controls =====
+async function fetchStatus() {
+  try {
+    const data = await api('GET', '/api/server/status')
+    if (data.code === 200) status.value = data.data
+  } catch { /* ignore */ }
+}
+
+async function serverStart() {
+  const data = await api('POST', '/api/server/start')
+  commandResult.value = JSON.stringify(data, null, 2)
+  setTimeout(fetchStatus, 2000)
+}
+
+async function serverStop() {
+  const data = await api('POST', '/api/server/stop')
+  commandResult.value = JSON.stringify(data, null, 2)
+  setTimeout(fetchStatus, 3000)
+}
+
+async function serverRestart() {
+  const data = await api('POST', '/api/server/restart')
+  commandResult.value = JSON.stringify(data, null, 2)
+  setTimeout(fetchStatus, 5000)
+}
+
+// ===== Command =====
+async function sendCommand() {
+  if (!command.value.trim()) return
+  const data = await api('POST', '/api/command', { command: command.value })
+  commandResult.value = JSON.stringify(data, null, 2)
+  command.value = ''
+}
+
+// ===== Logs (SSE) =====
+function startLogStream() {
+  stopLogStream()
+  const url = (baseURL.value || '') + `/api/logs?tail=${logTail.value}`
+  eventSource = new EventSource(url)
+
+  eventSource.onmessage = (e) => {
+    logs.value.push(e.data)
+    if (logs.value.length > 1000) logs.value.shift()
+    if (autoScroll.value) scrollToBottom()
+  }
+
+  eventSource.onerror = () => { /* auto-reconnect */ }
+}
+
+function stopLogStream() {
+  if (eventSource) { eventSource.close(); eventSource = null }
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (logContainer.value) logContainer.value.scrollTop = logContainer.value.scrollHeight
+  })
+}
+
+function clearLogs() { logs.value = [] }
+
+// ===== FTP =====
+async function ftpStart() {
+  const data = await api('POST', '/api/ftp/start', { port: ftpPort.value, username: 'root', password: 'minecraft' })
+  commandResult.value = JSON.stringify(data, null, 2)
+  fetchFTPStatus()
+}
+
+async function ftpStop() {
+  const data = await api('POST', '/api/ftp/stop')
+  commandResult.value = JSON.stringify(data, null, 2)
+  fetchFTPStatus()
+}
+
+async function fetchFTPStatus() {
+  try {
+    const data = await api('GET', '/api/ftp/status')
+    if (data.code === 200 && data.data) {
+      ftpRunning.value = data.data.running
+      if (data.data.port) ftpPort.value = data.data.port
+    }
+  } catch { /* ignore */ }
+}
+
+// ===== Lifecycle =====
+onMounted(() => { if (apiKey.value) checkConnection() })
+onUnmounted(() => { stopLogStream() })
+</script>
+
+<template>
+  <div class="app">
+    <header class="header">
+      <h1>&#x1F9B1; MC Server API 测试面板</h1>
+      <span class="badge" :class="connected ? 'ok' : 'err'">
+        {{ connected ? '&#x25CF; 已连接' : '&#x25CB; 未连接' }}
+      </span>
+    </header>
+
+    <!-- 连接配置 -->
+    <section class="card">
+      <h2>&#x1F511; API 连接</h2>
+      <div class="row">
+        <input v-model="baseURL" placeholder="API 地址 (http://host:25560)" class="input" />
+        <input v-model="apiKey" type="password" placeholder="API Key" class="input" />
+        <button @click="saveApiKey" class="btn primary">连接</button>
+      </div>
+    </section>
+
+    <!-- 状态 & 指令 -->
+    <div class="grid">
+      <section class="card">
+        <h2>&#x1F4CA; 服务端状态</h2>
+        <div class="status-grid">
+          <div class="stat"><label>运行状态</label><span :class="status.running ? 'green' : 'red'">{{ status.running ? '运行中' : '已停止' }}</span></div>
+          <div class="stat"><label>在线玩家</label><span>{{ status.players }}</span></div>
+          <div class="stat"><label>运行时间</label><span>{{ status.uptime || '-' }}</span></div>
+          <div class="stat"><label>版本</label><span>{{ status.version || '-' }}</span></div>
+        </div>
+        <div class="btn-group">
+          <button @click="serverStart" :disabled="status.running" class="btn success">&#x25B6; 启动</button>
+          <button @click="serverStop" :disabled="!status.running" class="btn danger">&#x25A0; 停止</button>
+          <button @click="serverRestart" :disabled="!status.running" class="btn warn">&#x21BA; 重启</button>
+          <button @click="fetchStatus" class="btn">&#x21BB; 刷新</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>&#x2328; 发送指令</h2>
+        <div class="row">
+          <input v-model="command" @keyup.enter="sendCommand" placeholder="例如: say Hello" class="input" />
+          <button @click="sendCommand" class="btn primary">发送</button>
+        </div>
+        <pre v-if="commandResult" class="result">{{ commandResult }}</pre>
+      </section>
+    </div>
+
+    <!-- FTP -->
+    <section class="card">
+      <h2>&#x1F4C1; FTP 管理</h2>
+      <div class="row">
+        <label>端口</label>
+        <input v-model.number="ftpPort" type="number" class="input short" />
+        <button @click="ftpStart" class="btn success" :disabled="ftpRunning">启动 FTP</button>
+        <button @click="ftpStop" class="btn danger" :disabled="!ftpRunning">停止 FTP</button>
+        <span class="badge" :class="ftpRunning ? 'ok' : 'err'">
+          {{ ftpRunning ? '&#x25CF; 运行中' : '&#x25CB; 已停止' }}
+        </span>
+      </div>
+    </section>
+
+    <!-- 日志 -->
+    <section class="card">
+      <h2>&#x1F4DC; 实时日志</h2>
+      <div class="log-toolbar">
+        <label>Tail <input v-model.number="logTail" type="number" class="input short" style="width:60px" /></label>
+        <label><input type="checkbox" v-model="autoScroll" /> 自动滚动</label>
+        <button @click="clearLogs" class="btn sm">清空</button>
+        <span v-if="logs.length" class="hint">{{ logs.length }} 行</span>
+      </div>
+      <div ref="logContainer" class="log-viewer">
+        <div v-for="(line, i) in logs" :key="i" class="log-line">{{ line }}</div>
+        <div v-if="logs.length === 0" class="log-empty">等待日志...</div>
+      </div>
+    </section>
+  </div>
+</template>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; }
+.app { max-width: 1100px; margin: 0 auto; padding: 20px; }
+.header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.header h1 { font-size: 22px; color: #58a6ff; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.card h2 { font-size: 15px; color: #8b949e; margin-bottom: 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.badge { font-size: 13px; padding: 2px 10px; border-radius: 12px; }
+.badge.ok { background: #1a3d1a; color: #3fb950; }
+.badge.err { background: #3d1a1a; color: #f85149; }
+.input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 10px; border-radius: 6px; font-size: 13px; flex: 1; min-width: 150px; }
+.input.short { flex: 0 0 90px; min-width: 60px; }
+.input:focus { outline: none; border-color: #58a6ff; }
+.btn { padding: 6px 14px; border: 1px solid #30363d; border-radius: 6px; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.btn:hover { background: #30363d; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.btn.success { background: #238636; border-color: #238636; color: #fff; }
+.btn.danger { background: #da3633; border-color: #da3633; color: #fff; }
+.btn.warn { background: #9e6a03; border-color: #9e6a03; color: #fff; }
+.btn.sm { padding: 3px 10px; font-size: 12px; }
+.btn-group { display: flex; gap: 6px; margin-top: 10px; }
+.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+.stat { display: flex; flex-direction: column; }
+.stat label { font-size: 11px; color: #8b949e; text-transform: uppercase; }
+.stat span { font-size: 15px; font-weight: 600; }
+.green { color: #3fb950; }
+.red { color: #f85149; }
+.result { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; margin-top: 8px; font-size: 12px; font-family: monospace; white-space: pre-wrap; max-height: 150px; overflow-y: auto; }
+.log-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 12px; }
+.log-toolbar .hint { color: #8b949e; }
+.log-viewer { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; height: 400px; overflow-y: auto; padding: 8px; font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.6; }
+.log-line { color: #8b949e; word-break: break-all; }
+.log-line:hover { background: #161b22; }
+.log-empty { color: #484f58; text-align: center; padding: 40px; }
+@media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+</style>
