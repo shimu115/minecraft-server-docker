@@ -16,6 +16,14 @@ const ftpRunning = ref(false)
 const ftpPort = ref(21)
 let eventSource = null
 
+// ===== File Browser =====
+const filePath = ref('')
+const files = ref([])
+const selectedFile = ref(null)
+const fileContent = ref('')
+const fileEditing = ref(false)
+const fileError = ref('')
+
 // ===== Helpers =====
 function headers() {
   const h = { 'Content-Type': 'application/json' }
@@ -43,7 +51,7 @@ async function checkConnection() {
   try {
     const data = await api('GET', '/api/health')
     connected.value = data.code === 200
-    if (connected.value) fetchStatus()
+    if (connected.value) { fetchStatus(); fetchFiles() }
   } catch {
     connected.value = false
   }
@@ -123,6 +131,62 @@ async function ftpStop() {
   fetchFTPStatus()
 }
 
+// ===== File Browser =====
+async function fetchFiles() {
+  try {
+    const data = await api('GET', `/api/files/list?path=${encodeURIComponent(filePath.value || '')}`)
+    if (data.code === 200) { files.value = data.data; fileError.value = '' }
+    else { fileError.value = data.message || '请求失败' }
+  } catch (e) { fileError.value = '连接失败: ' + e.message }
+}
+
+function enterDir(dir) {
+  filePath.value = dir
+  selectedFile.value = null
+  fileContent.value = ''
+  fileEditing.value = false
+  fetchFiles()
+}
+
+function goUp() {
+  const parts = filePath.value.split('/').filter(Boolean)
+  parts.pop()
+  filePath.value = parts.join('/')
+  selectedFile.value = null
+  fileContent.value = ''
+  fileEditing.value = false
+  fetchFiles()
+}
+
+async function openFile(f) {
+  if (f.isDir) { enterDir(f.path); return }
+  selectedFile.value = f
+  fileEditing.value = false
+  try {
+    const data = await api('GET', `/api/files/read?path=${encodeURIComponent(f.path)}`)
+    if (data.code === 200) fileContent.value = data.data.content
+  } catch { /* ignore */ }
+}
+
+function editFile() { fileEditing.value = true }
+
+async function saveFile() {
+  if (!selectedFile.value) return
+  try {
+    await api('POST', `/api/files/write?path=${encodeURIComponent(selectedFile.value.path)}`, { content: fileContent.value })
+    fileEditing.value = false
+  } catch { /* ignore */ }
+}
+
+async function deleteFile(f) {
+  if (!confirm(`确定删除 ${f.name}?`)) return
+  try {
+    await api('DELETE', `/api/files/delete?path=${encodeURIComponent(f.path)}`)
+    if (selectedFile.value?.path === f.path) { selectedFile.value = null; fileContent.value = '' }
+    fetchFiles()
+  } catch { /* ignore */ }
+}
+
 async function fetchFTPStatus() {
   try {
     const data = await api('GET', '/api/ftp/status')
@@ -131,6 +195,15 @@ async function fetchFTPStatus() {
       if (data.data.port) ftpPort.value = data.data.port
     }
   } catch { /* ignore */ }
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 B'
+  const u = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let s = bytes
+  while (s >= 1024 && i < u.length - 1) { s /= 1024; i++ }
+  return s.toFixed(i ? 1 : 0) + ' ' + u[i]
 }
 
 // ===== Lifecycle =====
@@ -199,6 +272,41 @@ onUnmounted(() => { stopLogStream() })
       </div>
     </section>
 
+    <!-- 文件管理 -->
+    <section class="card">
+      <h2>&#x1F4C4; 文件管理</h2>
+      <div class="row" style="margin-bottom:10px">
+        <span v-if="fileError" class="red" style="font-size:12px">{{ fileError }}</span>
+        <button @click="fetchFiles" class="btn primary sm">&#x21BB; 刷新</button>
+        <button v-if="filePath" @click="goUp" class="btn sm">&#x2190; 上级</button>
+        <span class="file-breadcrumb">./{{ filePath || '' }}</span>
+      </div>
+      <div class="file-layout">
+        <div class="file-list">
+          <div v-for="f in files" :key="f.path" class="file-row" :class="{ active: selectedFile?.path === f.path }" @click="openFile(f)">
+            <span>{{ f.isDir ? '&#x1F4C1;' : '&#x1F4C4;' }}</span>
+            <span class="file-name">{{ f.name }}</span>
+            <span class="file-size" v-if="!f.isDir">{{ formatSize(f.size) }}</span>
+            <button @click.stop="deleteFile(f)" class="btn sm danger" style="margin-left:auto">&#x2716;</button>
+          </div>
+          <div v-if="files.length === 0" class="log-empty">目录为空</div>
+        </div>
+        <div class="file-preview" v-if="selectedFile">
+          <div class="row" style="margin-bottom:6px">
+            <strong>{{ selectedFile.name }}</strong>
+            <span class="hint">{{ formatSize(selectedFile.size) }}</span>
+            <button v-if="!fileEditing" @click="editFile" class="btn sm">编辑</button>
+            <button v-if="fileEditing" @click="saveFile" class="btn sm success">保存</button>
+          </div>
+          <textarea v-if="fileEditing" v-model="fileContent" class="file-editor"></textarea>
+          <pre v-else class="file-content">{{ fileContent }}</pre>
+        </div>
+        <div class="file-preview" v-else>
+          <div class="log-empty">点击文件查看内容</div>
+        </div>
+      </div>
+    </section>
+
     <!-- 日志 -->
     <section class="card">
       <h2>&#x1F4DC; 实时日志</h2>
@@ -254,5 +362,16 @@ body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; 
 .log-line { color: #8b949e; word-break: break-all; }
 .log-line:hover { background: #161b22; }
 .log-empty { color: #484f58; text-align: center; padding: 40px; }
-@media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+.file-breadcrumb { color: #58a6ff; font-size: 13px; }
+.file-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.file-list { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; max-height: 300px; overflow-y: auto; }
+.file-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #21262d; }
+.file-row:hover { background: #161b22; }
+.file-row.active { background: #1f2a3a; }
+.file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-size { color: #8b949e; font-size: 11px; }
+.file-preview { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
+.file-content { max-height: 250px; overflow: auto; font-size: 12px; font-family: monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
+.file-editor { width: 100%; height: 250px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 8px; font-size: 12px; font-family: monospace; resize: vertical; }
+@media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .file-layout { grid-template-columns: 1fr; } }
 </style>

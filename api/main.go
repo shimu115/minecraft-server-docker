@@ -50,7 +50,14 @@ func main() {
 	mux.HandleFunc("POST /api/ftp/stop", handler.FTPStop())
 	mux.HandleFunc("GET /api/ftp/status", handler.FTPStatus())
 
-	h := middleware.Auth(middleware.CORS(mux))
+	// 文件管理
+	fileHandler := handler.NewFileHandler(mcDir)
+	mux.HandleFunc("GET /api/files/list", fileHandler.List())
+	mux.HandleFunc("GET /api/files/read", fileHandler.Read())
+	mux.HandleFunc("POST /api/files/write", fileHandler.Write())
+	mux.HandleFunc("DELETE /api/files/delete", fileHandler.Delete())
+
+	h := middleware.CORS(middleware.Auth(mux))
 
 	// HTTP 服务在 goroutine 中启动
 	go func() {
