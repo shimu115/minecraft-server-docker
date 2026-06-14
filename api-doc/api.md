@@ -419,7 +419,7 @@ curl -X POST -H "Authorization: Bearer <key>" \
 # POST /api/files/export  body: format=zip&key=<api-key>
 ```
 
-#### 10.1 列出目录
+#### 9.5 列出目录
 
 ```
 GET /api/files/list?path=<相对路径>
@@ -458,7 +458,7 @@ GET /api/files/list?path=<相对路径>
 
 目录排在文件前面，按名称排序。
 
-#### 10.2 读取文件
+#### 9.6 读取文件
 
 ```
 GET /api/files/read?path=<相对路径>
@@ -483,7 +483,7 @@ GET /api/files/read?path=<相对路径>
 }
 ```
 
-#### 10.3 写入文件
+#### 9.7 写入文件
 
 ```
 POST /api/files/write?path=<相对路径>
