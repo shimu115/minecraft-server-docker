@@ -304,15 +304,48 @@ onUnmounted(() => { stopLogStream() })
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; }
-.app { padding: 20px 40px; }
-.header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+  height: 100vh;           /* 锁定视口高度 */
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-shrink: 0;          /* 防止页头被压缩 */
+}
 .header h1 { font-size: 22px; color: #58a6ff; }
 .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .card h2 { font-size: 15px; color: #8b949e; margin-bottom: 12px; }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.main-layout { display: grid; grid-template-columns: 420px minmax(500px, 1fr); gap: 20px; height: calc(100vh - 120px); }
-.left-panel { min-width: 0; max-width: 420px; overflow-y: auto; }
-.right-panel { min-width: 400px; }
+.main-layout {
+  display: grid;
+  grid-template-columns: 420px minmax(500px, 1fr);
+  gap: 20px;
+  flex: 1;                 /* 弹性充满 header 剩下的所有高度 */
+  min-height: 0;           /* 🔥 极其关键：允许子元素收缩，否则会被内容撑开 */
+  height: calc(100vh - 120px); /* 备用双保险固定高度 */
+}
+/* 左侧控制面板：内部滚动 */
+.left-panel {
+  min-width: 0;
+  max-width: 420px;
+  overflow-y: auto;        /* 如果左侧卡片太多，左侧自己滚动 */
+  height: 100%;
+}
+/* 3. 右侧日志面板容器（假设你用了 .right-panel 或类似命名） */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;            /* 撑满 main-layout 的高度 */
+  min-height: 0;           /* 🔥 极其关键：防止被子类无限撑高 */
+}
 .log-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .log-card h2 { flex-shrink: 0; }
 .log-card .log-toolbar { flex-shrink: 0; }
