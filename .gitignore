@@ -6,6 +6,7 @@ data/
 *.1
 *.2
 minecraft/
+documents/
 
 # IDE
 .idea/
