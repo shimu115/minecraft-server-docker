@@ -19,4 +19,4 @@ services:
       # By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
       EULA: true
     volumes:
-      - /home/shimu/IdeaProjects/minecraft-server-docker/minecraft:/minecraft
+      - ./minecraft:/minecraft
