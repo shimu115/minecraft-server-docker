@@ -2,6 +2,9 @@
 
 set -e
 
+# Source JDK utilities (auto-detection + download)
+. /scripts/jdk.sh
+
 # 环境变量配置
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
@@ -12,31 +15,15 @@ WORKDIR="/minecraft"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
-# JDK 下载函数
-download_jdk() {
-  local jdk_version="$1"
-  local jdk_dir="/usr/lib/jvm/${jdk_version}"
+# 自动检测 JDK 版本
+JDK_VERSION=$(detect_java_version "$MC_VERSION" "$SERVER_TYPE")
+echo "[info] MC_VERSION=${MC_VERSION:-unset} SERVER_TYPE=$SERVER_TYPE → JDK $JDK_VERSION"
+download_jdk "$JDK_VERSION"
+JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
 
-  if [ -d "$jdk_dir" ] && [ -x "$jdk_dir/bin/java" ]; then
-    echo "[info] JDK $jdk_version already present, skipping download."
-    return
-  fi
-
-  echo "[info] Downloading JDK $jdk_version..."
-  mkdir -p "$jdk_dir"
-  wget -q -O /tmp/jdk.tar.gz \
-    "https://api.adoptium.net/v3/binary/latest/${jdk_version}/ga/linux/x64/jdk/hotspot/normal/eclipse"
-  tar -xzf /tmp/jdk.tar.gz -C "$jdk_dir" --strip-components=1
-  rm /tmp/jdk.tar.gz
-  echo "[info] JDK $jdk_version installed to $jdk_dir"
-}
-
-# 根据 SERVER_TYPE 下载对应 JDK 并设置参数
+# 根据 SERVER_TYPE 设置 JAR_FILE 和 DOWNLOAD_URL
 case "$SERVER_TYPE" in
   vanilla)
-    JDK_VERSION=${JAVA_VERSION:-21}
-    download_jdk "$JDK_VERSION"
-    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-server.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar"
@@ -44,9 +31,6 @@ case "$SERVER_TYPE" in
     ;;
 
   forge)
-    JDK_VERSION=${JAVA_VERSION:-17}
-    download_jdk "$JDK_VERSION"
-    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-forge-installer.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-installer.jar"
@@ -54,9 +38,6 @@ case "$SERVER_TYPE" in
     ;;
 
   fabric)
-    JDK_VERSION=${JAVA_VERSION:-17}
-    download_jdk "$JDK_VERSION"
-    JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
     JAR_FILE=${JAR_FILE:-fabric-server-launch.jar}
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.14.21/1.0.0/server/jar"
@@ -90,7 +71,9 @@ download_if_needed() {
 # Forge 安装器始终重新下载，避免版本残留
 if [ "$SERVER_TYPE" = "forge" ]; then
   echo "[info] Downloading $JAR_FILE..."
+  echo "[info] Download url $DOWNLOAD_URL"
   wget -q "$DOWNLOAD_URL" -O "$JAR_FILE"
+  echo "[info] Downloaded $DOWNLOAD_URL."
   echo "[info] Downloaded $JAR_FILE."
 else
   download_if_needed "$JAR_FILE"

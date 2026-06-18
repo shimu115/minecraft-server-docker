@@ -6,17 +6,17 @@ services:
       - "25565:25565"
       - "25560:25560"
     environment:
-      JAVA_VERSION: "8"
+      MC_VERSION: "1.12.2"
       SERVER_TYPE: forge
-      DOWNLOAD_URL: "https://maven.minecraftforge.net/net/minecraftforge/forge/1.12.2-14.23.5.2864/forge-1.12.2-14.23.5.2864-installer.jar"
+#      DOWNLOAD_URL: "https://maven.minecraftforge.net/net/minecraftforge/forge/1.12.2-14.23.5.2864/forge-1.12.2-14.23.5.2864-installer.jar"
       Xms: "1024M"
       Xmx: "4096M"
       TZ: Asia/Shanghai
-      ANG: C.UTF-8
+      LANG: C.UTF-8
       LC_ALL: C.UTF-8
       # 运行此容器即代表您同意 Minecraft 的 EULA 协议 (https://aka.ms/MinecraftEULA)
       # eula.txt 中的原内容：
       # By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
       EULA: true
     volumes:
-      - ./minecraft:/minecraft
+      - /home/shimu/IdeaProjects/minecraft-server-docker/minecraft:/minecraft

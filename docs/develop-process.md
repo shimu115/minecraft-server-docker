@@ -156,6 +156,26 @@ api/
 - 删除请求触发 CORS 预检失败 → 允许 `DELETE` 方法
 - 上传用独立 fetch（FormData，不带 `Content-Type: application/json`）
 
+### 第八阶段：自动 JDK 选择与目录重构（P0）
+
+**目标**：根据 `MC_VERSION` 自动推断 JDK 版本，重构项目目录为 bootstrap 架构做准备。
+
+1. 新增 `scripts/jdk.sh`：提取 `download_jdk` 函数 + 新增 `detect_java_version` 版本解析函数
+2. 重构 `scripts/start.sh`：统一 JDK 检测逻辑，移除各 `case` 分支中分散的 `JAVA_VERSION` 默认值
+3. 优先级链：`JAVA_VERSION` 显式指定 > `MC_VERSION` 自动映射 > `SERVER_TYPE` 默认兜底
+4. 映射规则：1.16- → Java 8，1.17 → Java 16，1.18~1.20.4 → Java 17，1.20.5+ → Java 21
+5. 目录重构：脚本移入 `scripts/`（`start.sh`、`run.sh`、`jdk.sh`），文档整合到 `docs/`
+6. Dockerfile 改为 `COPY ./scripts/ /scripts/`，CMD 更新为 `/scripts/start.sh`
+7. `docker-compose.yaml` 示例改用 `MC_VERSION: "1.12.2"` 替代 `JAVA_VERSION: "8"`
+
+**问题与解决**：
+- POSIX sh 不支持 Bash 的 `[[ ]]` 和 `${var:-default}` 高级语法 → 全部使用 `[ ]` + `-n`/`-eq`/`-le` 标准写法
+- Minecraft 版本号解析："1.20.5" 的 patch 数字 "5" 可能被 `cut -d. -f3` 解析为空（两段版本如 "1.20"） → `patch="${patch:-0}"` 兜底，保证整数比较安全
+- 1.20.5 边界处理：minor=20 时需要额外检查 patch≥5 → 嵌套 if 判断精确分流
+- `local` 关键字在 POSIX 中非标准但被 `dash`/`ash` 广泛支持 → 沿用项目现有惯例（`start.sh` 已使用）
+- Forge 安装器生成的 `run.sh` 与项目 `run.sh` 同名冲突 → 项目中 `start.sh` 已将 Forge 的 `run.sh` 重命名为 `forge-launcher.sh`，且项目 `run.sh` 移入 `scripts/` 后不再混淆
+- `docker exec mc-server ./run.sh` 路径失效 → 更新为绝对路径 `/scripts/run.sh`，避免与 `/minecraft` 目录下的文件混淆
+
 ## API 路由总览
 
 | 方法 | 路径 | 认证 | 功能 |

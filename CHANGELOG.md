@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.0 (unreleased)
+
+### ✨ 新功能
+
+- **自动 JDK 选择**：根据 `MC_VERSION` 自动推断合适的 JDK 版本，`JAVA_VERSION` 支持 `auto` 值。映射规则：1.16 及更早 → Java 8，1.17 → Java 16，1.18~1.20.4 → Java 17，1.20.5+ → Java 21。（P0）
+- **项目目录重构**：Shell 脚本移至 `scripts/` 目录，JDK 逻辑抽取到 `scripts/jdk.sh`，文档整合到 `docs/` 目录。（P0）
+
+### 🔧 改进
+
+- Dockerfile 统一 COPY `scripts/` 目录而非单文件。
+- `docker-compose.yaml` 示例改用 `MC_VERSION` 演示自动 JDK 选择。
+
+---
+
 ## v1.0.0 (2026-06-07)
 
 > Git tag: `v1.0.0` · Commit: `e3aabb4`

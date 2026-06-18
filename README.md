@@ -30,23 +30,24 @@ docker run -d \
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `SERVER_TYPE` | `vanilla` | 服务端类型：`vanilla` / `forge` / `fabric` |
-| `JAVA_VERSION` | 按类型自动选择 | JDK 大版本号：`8` / `17` / `21` |
+| `MC_VERSION` | — | Minecraft 版本号，如 `1.12.2`、`1.21.1`，用于自动推断 JDK 版本 |
+| `JAVA_VERSION` | `auto` | JDK 大版本号：`8` / `16` / `17` / `21`，设为 `auto` 或省略时根据 `MC_VERSION` 自动选择 |
 | `DOWNLOAD_URL` | 按类型自动选择 | 服务端 jar 下载地址 |
 | `JAR_FILE` | 按类型自动选择 | 服务端 jar 文件名 |
 | `Xmx` | `1024M` | 最大内存 |
 | `Xms` | `1024M` | 初始内存 |
 | `TZ` | — | 时区，如 `Asia/Shanghai` |
 
-> **注意**：手动设置 `JAVA_VERSION` 时务必核对 Minecraft 版本对应的 JDK 要求，版本不匹配会导致服务端无法启动。
+> **JDK 自动选择**：当 `JAVA_VERSION` 未设置或设为 `auto` 时，系统根据 `MC_VERSION` 自动选择合适的 JDK：
 >
-> | Minecraft 版本 | 所需 JDK |
-> |---------------|----------|
-> | 1.12.2 及更早 | JDK 8 |
-> | 1.13 ~ 1.16.5 | JDK 8 / 11 |
-> | 1.17 ~ 1.20.4 | JDK 17 |
+> | Minecraft 版本 | 自动选择 JDK |
+> |---------------|-------------|
+> | 1.7.x ~ 1.16.x | JDK 8 |
+> | 1.17.x | JDK 16 |
+> | 1.18.x ~ 1.20.4 | JDK 17 |
 > | 1.20.5+ | JDK 21 |
 >
-> 上表为通用参考，具体以服务端实际要求为准。
+> 高级用户可通过 `JAVA_VERSION=17` 强制覆盖自动选择。
 
 ## 使用示例
 
@@ -58,7 +59,7 @@ docker run -d \
   -p 25565:25565 \
   -v $(pwd)/minecraft:/minecraft \
   -e SERVER_TYPE=forge \
-  -e JAVA_VERSION=8 \
+  -e MC_VERSION=1.12.2 \
   -e DOWNLOAD_URL="https://maven.minecraftforge.net/net/minecraftforge/forge/1.12.2-14.23.5.2864/forge-1.12.2-14.23.5.2864-installer.jar" \
   -e Xms=1024M \
   -e Xmx=4096M \
@@ -86,15 +87,15 @@ docker compose up -d
 服务端运行在 screen 会话中，重启命令：
 
 ```bash
-docker exec mc-server ./run.sh
+docker exec mc-server /scripts/run.sh
 ```
 
 ## 工作原理
 
-1. 容器启动执行 `start.sh`，根据 `SERVER_TYPE` 自动下载对应 JDK（Eclipse Temurin）和服务端 jar
+1. 容器启动执行 `scripts/start.sh`，根据 `MC_VERSION` 自动选择 JDK 版本，按需下载服务端 jar
 2. Forge 类型会自动执行 `--installServer` 完成安装
-3. 环境变量写入 `/minecraft/.env`，从 GitHub 拉取最新 `run.sh`
-4. `run.sh` 读取 `.env` 在 screen 会话中启动服务端并 tail 日志
+3. 环境变量写入 `/minecraft/.env`
+4. `/scripts/run.sh` 读取 `.env` 在 screen 会话中启动服务端并 tail 日志
 
 镜像不捆绑 JDK，所有依赖在容器启动时按需下载，镜像体积小且无许可证风险。
 

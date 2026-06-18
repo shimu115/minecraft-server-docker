@@ -17,11 +17,11 @@ RUN apt update \
  && apt install -y bash wget screen tar \
  && rm -rf /var/lib/apt/lists/*
 
-# 拷贝启动脚本
-COPY ./start.sh /
+# 拷贝脚本
+COPY ./scripts/ /scripts/
 
-# 设置启动脚本可执行
-RUN chmod +x /start.sh
+# 设置脚本可执行
+RUN chmod +x /scripts/start.sh /scripts/run.sh /scripts/jdk.sh
 
 # 拷贝 Go API 二进制
 COPY --from=builder /mc-api /usr/local/bin/mc-api
@@ -33,4 +33,4 @@ WORKDIR /minecraft
 EXPOSE 25565 25560
 
 # 启动命令
-CMD ["/start.sh"]
+CMD ["/scripts/start.sh"]
