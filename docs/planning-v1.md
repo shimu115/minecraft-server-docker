@@ -440,11 +440,12 @@ P0
 P1
 
 * Go API模块化
-* SpringBoot初始化
+* Go API单元测试
 * 服务端版本自动解析
 
 P2
 
+* SpringBoot初始化
 * Dashboard
 * Console
 * File Manager

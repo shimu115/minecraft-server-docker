@@ -1,6 +1,6 @@
 # Minecraft Server Docker
 
-一键部署 Minecraft 服务端的 Docker 镜像，支持 Vanilla、Forge、Fabric。
+一键部署 Minecraft 服务端的 Docker 镜像，支持 Vanilla、Forge、Fabric、NeoForge。
 
 ## 快速开始
 
@@ -24,15 +24,16 @@ docker run -d \
 | `vanilla` | 1.21 | 21 | 原版服务端（默认） |
 | `forge` | 1.20.1 | 17 | Forge 模组服务端 |
 | `fabric` | 1.20.1 | 17 | Fabric 模组服务端 |
+| `neoforge` | 1.21.1 | 17 | NeoForge 模组服务端 |
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `SERVER_TYPE` | `vanilla` | 服务端类型：`vanilla` / `forge` / `fabric` |
+| `SERVER_TYPE` | `vanilla` | 服务端类型：`vanilla` / `forge` / `fabric` / `neoforge` |
 | `MC_VERSION` | — | Minecraft 版本号，如 `1.12.2`、`1.21.1`，用于自动推断 JDK 版本 |
 | `JAVA_VERSION` | `auto` | JDK 大版本号：`8` / `16` / `17` / `21`，设为 `auto` 或省略时根据 `MC_VERSION` 自动选择 |
-| `DOWNLOAD_URL` | 按类型自动选择 | 服务端 jar 下载地址 |
+| `DOWNLOAD_URL` | 自动解析 | 服务端 jar 下载地址（设 `MC_VERSION` 后自动获取，也可手动覆盖） |
 | `JAR_FILE` | 按类型自动选择 | 服务端 jar 文件名 |
 | `Xmx` | `1024M` | 最大内存 |
 | `Xms` | `1024M` | 初始内存 |
@@ -92,10 +93,11 @@ docker exec mc-server /scripts/run.sh
 
 ## 工作原理
 
-1. 容器启动执行 `scripts/start.sh`，根据 `MC_VERSION` 自动选择 JDK 版本，按需下载服务端 jar
-2. Forge 类型会自动执行 `--installServer` 完成安装
-3. 环境变量写入 `/minecraft/.env`
-4. `/scripts/run.sh` 读取 `.env` 在 screen 会话中启动服务端并 tail 日志
+1. 容器启动执行 `scripts/start.sh`，根据 `MC_VERSION` 自动选择 JDK 版本并解析下载地址
+2. 服务端 jar 从上游 API 自动获取（Vanilla→Mojang, Forge→Maven, Fabric→Meta, NeoForge→Maven）
+3. Forge / NeoForge 类型会自动执行 `--installServer` 完成安装
+4. 环境变量写入 `/minecraft/.env`
+5. Go HTTP API（mc-api）接管容器主进程，提供 REST API + SSE 日志流
 
 镜像不捆绑 JDK，所有依赖在容器启动时按需下载，镜像体积小且无许可证风险。
 

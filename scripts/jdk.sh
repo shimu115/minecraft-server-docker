@@ -83,7 +83,7 @@ detect_java_version() {
   # Priority 3: fallback to per-type defaults (backward compatibility)
   case "$server_type" in
     vanilla) echo "21" ;;
-    forge|fabric) echo "17" ;;
+    forge|fabric|neoforge) echo "17" ;;
     *) echo "21" ;;
   esac
 }

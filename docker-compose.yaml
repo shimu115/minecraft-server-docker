@@ -8,7 +8,6 @@ services:
     environment:
       MC_VERSION: "1.12.2"
       SERVER_TYPE: forge
-#      DOWNLOAD_URL: "https://maven.minecraftforge.net/net/minecraftforge/forge/1.12.2-14.23.5.2864/forge-1.12.2-14.23.5.2864-installer.jar"
       Xms: "1024M"
       Xmx: "4096M"
       TZ: Asia/Shanghai

@@ -14,7 +14,7 @@ RUN mkdir -p /minecraft
 
 # 安装运行依赖
 RUN apt update \
- && apt install -y bash wget screen tar \
+ && apt install -y bash wget screen tar curl \
  && rm -rf /var/lib/apt/lists/*
 
 # 拷贝脚本

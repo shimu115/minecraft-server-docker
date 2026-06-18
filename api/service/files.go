@@ -10,16 +10,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-)
 
-// FileInfo 文件信息
-type FileInfo struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	IsDir   bool   `json:"isDir"`
-	Size    int64  `json:"size"`
-	ModTime string `json:"modTime"`
-}
+	"github.com/shimu115/minecraft-server-docker/api/model"
+)
 
 // resolveBase 将 baseDir 转为绝对路径
 func resolveBase(baseDir string) (string, error) {
@@ -49,7 +42,7 @@ func safePath(baseDir, relPath string) (string, error) {
 }
 
 // ListDir 列出目录内容
-func ListDir(baseDir, relPath string) ([]FileInfo, error) {
+func ListDir(baseDir, relPath string) ([]model.FileInfo, error) {
 	dir, err := safePath(baseDir, relPath)
 	if err != nil {
 		return nil, err
@@ -60,13 +53,13 @@ func ListDir(baseDir, relPath string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	files := make([]FileInfo, 0)
+	files := make([]model.FileInfo, 0)
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		files = append(files, FileInfo{
+		files = append(files, model.FileInfo{
 			Name:    e.Name(),
 			Path:    filepath.Join(relPath, e.Name()),
 			IsDir:   e.IsDir(),

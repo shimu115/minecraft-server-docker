@@ -21,15 +21,11 @@ type CommandRequest struct {
 	Command string `json:"command"`
 }
 
-// FTPStartRequest FTP 启动请求
-type FTPStartRequest struct {
-	Port     uint16 `json:"port,omitempty"`
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-}
-
-// FTPStatusResponse FTP 状态
-type FTPStatusResponse struct {
-	Running bool   `json:"running"`
-	Port    uint16 `json:"port"`
+// FileInfo 文件信息
+type FileInfo struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"isDir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"modTime"`
 }

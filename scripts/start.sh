@@ -5,6 +5,9 @@ set -e
 # Source JDK utilities (auto-detection + download)
 . /scripts/jdk.sh
 
+# Source version resolution (auto-detect download URLs)
+. /scripts/version-resolve.sh
+
 # 环境变量配置
 Xmx=${Xmx:-1024M}
 Xms=${Xms:-1024M}
@@ -25,6 +28,10 @@ JAVA_HOME="/usr/lib/jvm/$JDK_VERSION"
 case "$SERVER_TYPE" in
   vanilla)
     JAR_FILE=${JAR_FILE:-server.jar}
+    if [ -z "$DOWNLOAD_URL" ] && [ -n "$MC_VERSION" ]; then
+      echo "[info] Resolving vanilla download URL for $MC_VERSION..."
+      DOWNLOAD_URL=$(resolve_vanilla_url "$MC_VERSION")
+    fi
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar"
     fi
@@ -32,6 +39,10 @@ case "$SERVER_TYPE" in
 
   forge)
     JAR_FILE=${JAR_FILE:-forge-installer.jar}
+    if [ -z "$DOWNLOAD_URL" ] && [ -n "$MC_VERSION" ]; then
+      echo "[info] Resolving Forge download URL for $MC_VERSION..."
+      DOWNLOAD_URL=$(resolve_forge_url "$MC_VERSION")
+    fi
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.2.0/forge-1.20.1-47.2.0-installer.jar"
     fi
@@ -39,8 +50,24 @@ case "$SERVER_TYPE" in
 
   fabric)
     JAR_FILE=${JAR_FILE:-fabric-server-launch.jar}
+    if [ -z "$DOWNLOAD_URL" ] && [ -n "$MC_VERSION" ]; then
+      echo "[info] Resolving Fabric download URL for $MC_VERSION..."
+      DOWNLOAD_URL=$(resolve_fabric_url "$MC_VERSION")
+    fi
     if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
       DOWNLOAD_URL="https://meta.fabricmc.net/v2/versions/loader/1.20.1/0.14.21/1.0.0/server/jar"
+    fi
+    ;;
+
+  neoforge)
+    JAR_FILE=${JAR_FILE:-neoforge-installer.jar}
+    if [ -z "$DOWNLOAD_URL" ] && [ -n "$MC_VERSION" ]; then
+      echo "[info] Resolving NeoForge download URL for $MC_VERSION..."
+      DOWNLOAD_URL=$(resolve_neoforge_url "$MC_VERSION")
+    fi
+    if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
+      echo "[error] DOWNLOAD_URL not set and MC_VERSION not provided. Cannot continue."
+      exit 1
     fi
     ;;
 
@@ -49,6 +76,12 @@ case "$SERVER_TYPE" in
     exit 1
     ;;
 esac
+
+if [ -z "$DOWNLOAD_URL" ] && [ ! -f "$JAR_FILE" ]; then
+  echo "[error] Could not determine download URL for $SERVER_TYPE (MC_VERSION=${MC_VERSION:-unset})"
+  echo "[error] Please set DOWNLOAD_URL manually or provide a valid MC_VERSION."
+  exit 1
+fi
 
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
@@ -68,47 +101,54 @@ download_if_needed() {
   fi
 }
 
-# Forge 安装器始终重新下载，避免版本残留
-if [ "$SERVER_TYPE" = "forge" ]; then
-  echo "[info] Downloading $JAR_FILE..."
-  echo "[info] Download url $DOWNLOAD_URL"
-  wget -q "$DOWNLOAD_URL" -O "$JAR_FILE"
-  echo "[info] Downloaded $DOWNLOAD_URL."
-  echo "[info] Downloaded $JAR_FILE."
-else
-  download_if_needed "$JAR_FILE"
-fi
+# Forge / NeoForge 安装器始终重新下载，避免版本残留
+case "$SERVER_TYPE" in
+  forge|neoforge)
+    echo "[info] Downloading $JAR_FILE..."
+    echo "[info] Download url $DOWNLOAD_URL"
+    wget -q "$DOWNLOAD_URL" -O "$JAR_FILE"
+    echo "[info] Downloaded $DOWNLOAD_URL."
+    echo "[info] Downloaded $JAR_FILE."
+    ;;
+  *)
+    download_if_needed "$JAR_FILE"
+    ;;
+esac
 
 echo "eula=$EULA" > eula.txt
 
-# Forge 安装
-if [ "$SERVER_TYPE" = "forge" ]; then
-  if [ ! -d "libraries" ]; then
-    echo "[info] Installing Forge server..."
-    java -jar "$JAR_FILE" --installServer
+# Forge / NeoForge 安装
+case "$SERVER_TYPE" in
+  forge|neoforge)
+    if [ ! -d "libraries" ]; then
+      echo "[info] Installing $SERVER_TYPE server..."
+      java -jar "$JAR_FILE" --installServer
 
-    echo "[info] Forge install finished. Files in workdir:"
-    ls -la
+      echo "[info] $SERVER_TYPE install finished. Files in workdir:"
+      ls -la
 
-    if [ -f "run.sh" ]; then
-      mv run.sh forge-launcher.sh
-      chmod +x forge-launcher.sh
-      echo "[info] Renamed Forge run.sh to forge-launcher.sh"
+      if [ "$SERVER_TYPE" = "forge" ] && [ -f "run.sh" ]; then
+        mv run.sh forge-launcher.sh
+        chmod +x forge-launcher.sh
+        echo "[info] Renamed Forge run.sh to forge-launcher.sh"
+      fi
+    else
+      echo "[info] $SERVER_TYPE already installed. Skipping installer."
     fi
-  else
-    echo "[info] Forge already installed. Skipping installer."
-  fi
 
-  JVM_ARGS_FILE="user_jvm_args.txt"
-  if [ -f "$JVM_ARGS_FILE" ]; then
-    sed -i "s/-Xmx[^ ]*/-Xmx$Xmx/" "$JVM_ARGS_FILE"
-    sed -i "s/-Xms[^ ]*/-Xms$Xms/" "$JVM_ARGS_FILE"
-    echo "[info] Updated memory in $JVM_ARGS_FILE"
-  else
-    echo "-Xmx$Xmx -Xms$Xms" > "$JVM_ARGS_FILE"
-    echo "[info] Created $JVM_ARGS_FILE with memory settings"
-  fi
-fi
+    if [ "$SERVER_TYPE" = "forge" ]; then
+      JVM_ARGS_FILE="user_jvm_args.txt"
+      if [ -f "$JVM_ARGS_FILE" ]; then
+        sed -i "s/-Xmx[^ ]*/-Xmx$Xmx/" "$JVM_ARGS_FILE"
+        sed -i "s/-Xms[^ ]*/-Xms$Xms/" "$JVM_ARGS_FILE"
+        echo "[info] Updated memory in $JVM_ARGS_FILE"
+      else
+        echo "-Xmx$Xmx -Xms$Xms" > "$JVM_ARGS_FILE"
+        echo "[info] Created $JVM_ARGS_FILE with memory settings"
+      fi
+    fi
+    ;;
+esac
 
 # 写入环境变量文件，供 API 服务读取
 cat > /minecraft/.env << EOF

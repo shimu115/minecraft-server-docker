@@ -176,6 +176,48 @@ api/
 - Forge 安装器生成的 `run.sh` 与项目 `run.sh` 同名冲突 → 项目中 `start.sh` 已将 Forge 的 `run.sh` 重命名为 `forge-launcher.sh`，且项目 `run.sh` 移入 `scripts/` 后不再混淆
 - `docker exec mc-server ./run.sh` 路径失效 → 更新为绝对路径 `/scripts/run.sh`，避免与 `/minecraft` 目录下的文件混淆
 
+### 第九阶段：服务端版本自动解析 + Go API 模块化 + 单元测试（P1）
+
+**目标**：用户只需 `SERVER_TYPE` + `MC_VERSION` 即可启动，无需手动填写 `DOWNLOAD_URL`；Go API 代码分层规范化并添加测试覆盖。
+
+**Part A: Go API 模块化**（6 项重构）：
+1. 移除 `model/types.go` 中未使用的 `FTPStartRequest`、`FTPStatusResponse` 类型，替换为 `FileInfo`（从 service 层迁入）
+2. 合并 handler helper：`writeJSON`/`writeError`/`writeOK` 从 `health.go` 移至 `helpers.go`
+3. `getScreenUptime()` 从 handler 下沉到 `service/screen.go`，导出为 `GetScreenUptime()`
+4. `detectVersion()` 从 handler 下沉到 `service/logs.go`，导出为 `DetectVersion()`
+5. handler 中重复的 `exec.Command("screen", "-wipe")` 替换为 `service.CleanupDeadSessions()`
+6. `FileInfo` 结构体从 `service/files.go` 迁至 `model/types.go`，service 通过 `model.FileInfo` 引用
+
+**Part B: 单元测试**（8 个测试文件）：
+- `model/types_test.go`：APIResponse JSON 序列化、FileInfo 结构体验证
+- `service/auth_test.go`：API Key 生成/校验/刷新/UUID 格式，使用 `t.TempDir()` 隔离文件系统
+- `service/files_test.go`：路径安全校验、目录列表、读写删除、上传、导出 zip/tar.gz
+- `service/screen_test.go`：`.env` 解析、启动命令构建（vanilla/forge）
+- `service/logs_test.go`：LogReader 偏移量追踪、DetectVersion 版本检测
+- `handler/health_test.go`：健康检查、writeJSON/writeError/writeOK 辅助函数
+- `middleware/auth_test.go`：免认证路径跳过、无 token 拒绝、Bearer 提取、表单 key 参数
+- `middleware/cors_test.go`：CORS 响应头、OPTIONS 预检返回 204
+- `const` 改 `var`：`authDir` 从 `const` 改为 `var` 以便测试覆盖文件路径
+
+**Part C: 服务端版本自动解析**：
+1. 新增 `scripts/version-resolve.sh`：4 个解析函数通过上游 API 自动获取下载地址
+   - `resolve_vanilla_url`：查询 Mojang Version Manifest → 版本详情 → downloads.server.url
+   - `resolve_forge_url`：查询 Forge Maven metadata XML → 解析版本列表 → installer jar URL
+   - `resolve_fabric_url`：查询 Fabric Meta API → 最新 stable loader + installer → server/jar URL
+   - `resolve_neoforge_url`：转换 MC 版本前缀（去 "1."）→ NeoForge Maven metadata → installer jar URL
+2. 新增 `neoforge` 服务端类型：`scripts/jdk.sh` 默认 JDK 17，`scripts/start.sh` 支持安装流程
+3. `scripts/start.sh` 集成：`DOWNLOAD_URL` 为空时自动调用对应 resolve 函数，Forge/NeoForge 共享安装逻辑
+4. 兜底机制：API 解析失败时回退到硬编码默认 URL，绝对兜底报错提示用户手动设置
+
+**问题与解决**：
+- Fabric loader API 返回的 JSON 结构嵌套复杂（loader 版本在对象 key 中） → 用 `grep -o` 匹配 `"stable":true` 标记定位最新稳定版本
+- NeoForge 版本号展平格式（`1.21.1` → `21.1.`）与 beta 后缀混杂 → 优先 `grep -v -- '-beta\|-alpha'` 过滤测试版，无稳定版再回退包含
+- Forge maven-metadata.xml 中 `<latest>` 是全局最新而非特定 MC 版本 → 只用 `<version>` 列表 + `grep "^<mc_version>-"` 精确过滤
+- Vanilla 版本清单两级查询（manifest → detail）→ 分两步：先通过 version `id` 定位 detail URL，再取 `downloads.server.url`
+- handler 中 `getScreenUptime`/`detectVersion` 直接操作 OS 命令/文件违反分层 → 下沉到 service 层，handler 仅调用 service 导出函数
+- `const authDir` 导致测试无法隔离文件系统 → 改为 `var` 允许测试覆盖路径
+- handler/mcserver.go 移除了 `getScreenUptime`、`detectVersion` 及不再需要的 import（`bufio`/`os`/`os/exec`/`strings`）
+
 ## API 路由总览
 
 | 方法 | 路径 | 认证 | 功能 |

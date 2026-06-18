@@ -1,13 +1,9 @@
 package handler
 
 import (
-	"bufio"
 	"fmt"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/shimu115/minecraft-server-docker/api/model"
@@ -80,7 +76,7 @@ func (h *serverHandler) Restart() http.HandlerFunc {
 			}
 		}
 
-		exec.Command("screen", "-wipe").Run()
+		service.CleanupDeadSessions()
 		time.Sleep(2 * time.Second)
 
 		h.Start().ServeHTTP(w, r)
@@ -98,8 +94,8 @@ func (h *serverHandler) Status() http.HandlerFunc {
 		}
 
 		if running {
-			resp.Uptime = getScreenUptime()
-			resp.Version = detectVersion(filepath.Join(h.mcDir, "logs", "latest.log"))
+			resp.Uptime = service.GetScreenUptime()
+			resp.Version = service.DetectVersion(filepath.Join(h.mcDir, "logs", "latest.log"))
 			resp.Players = service.GetPlayerCount(filepath.Join(h.mcDir, "logs", "latest.log"))
 		}
 
@@ -109,42 +105,4 @@ func (h *serverHandler) Status() http.HandlerFunc {
 			Data:   resp,
 		})
 	}
-}
-
-func getScreenUptime() string {
-	cmd := exec.Command("screen", "-ls")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, "mcserver") {
-			for _, p := range strings.Fields(line) {
-				if strings.Contains(p, ":") && !strings.Contains(p, ".") {
-					return strings.TrimRight(p, "()")
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func detectVersion(logPath string) string {
-	f, err := os.Open(logPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "Starting minecraft server version") {
-			parts := strings.Fields(line)
-			if len(parts) > 0 {
-				return parts[len(parts)-1]
-			}
-		}
-	}
-	return ""
 }

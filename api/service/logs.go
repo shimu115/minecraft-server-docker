@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"io"
 	"os"
 	"strings"
@@ -94,4 +95,25 @@ func (r *LogReader) ReadNewLines() ([]string, error) {
 // Close 关闭日志读取器
 func (r *LogReader) Close() error {
 	return r.file.Close()
+}
+
+// DetectVersion 从日志文件检测 Minecraft 版本
+func DetectVersion(logPath string) string {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Starting minecraft server version") {
+			parts := strings.Fields(line)
+			if len(parts) > 0 {
+				return parts[len(parts)-1]
+			}
+		}
+	}
+	return ""
 }

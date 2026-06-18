@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-const authDir = "./auth"
+var authDir = "./auth"
+
 const authFile = "api_key.txt"
 
 // InitAPIKey 初始化 API Key（首次生成，后续从文件读取）

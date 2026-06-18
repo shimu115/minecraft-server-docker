@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/shimu115/minecraft-server-docker/api/model"
@@ -21,25 +20,6 @@ func Health() http.HandlerFunc {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, resp model.APIResponse) {
-	if resp.Code == 0 {
-		resp.Code = http.StatusOK
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if resp.Code >= 400 {
-		w.WriteHeader(resp.Code)
-	}
-	json.NewEncoder(w).Encode(resp)
-}
-
-func writeError(w http.ResponseWriter, message string, code int) {
-	writeJSON(w, model.APIResponse{
-		Code:    code,
-		Status:  "error",
-		Message: message,
-	})
-}
-
 // RefreshKey 刷新 API Key
 func RefreshKey() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -55,12 +35,4 @@ func RefreshKey() http.HandlerFunc {
 			Data:    map[string]string{"api_key": key},
 		})
 	}
-}
-
-func writeOK(w http.ResponseWriter, message string) {
-	writeJSON(w, model.APIResponse{
-		Code:    http.StatusOK,
-		Status:  "ok",
-		Message: message,
-	})
 }

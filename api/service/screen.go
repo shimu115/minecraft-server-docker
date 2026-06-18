@@ -171,3 +171,22 @@ func findForgeJar(dir string) (string, error) {
 	}
 	return "", fmt.Errorf("no forge jar found")
 }
+
+// GetScreenUptime 获取 screen 会话运行时长
+func GetScreenUptime() string {
+	cmd := exec.Command("screen", "-ls")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, ScreenName) {
+			for _, p := range strings.Fields(line) {
+				if strings.Contains(p, ":") && !strings.Contains(p, ".") {
+					return strings.TrimRight(p, "()")
+				}
+			}
+		}
+	}
+	return ""
+}
