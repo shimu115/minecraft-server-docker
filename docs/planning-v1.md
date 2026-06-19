@@ -780,63 +780,112 @@ POST /api/server/op
 
 ---
 
-# 十、Spring Boot 面板初始化（P2）
+# 十、Spring Boot 面板基础设施初始化（P2）
 
 ## 目标
 
-初始化 Spring Boot 后端项目，作为统一业务层。
+初始化 Spring Boot 后端项目，优先构建基础设施层（实例管理 + API Key 绑定 + Agent 通信），
+业务权限逻辑延后到 P3/P4 实现。
 
-职责：
-
-```text
-用户管理
-
-权限管理
-
-资源保护
-
-实例管理
-
-操作日志
-
-Agent通信
-```
+详细方案见：[[springboot-infra-plan]]
 
 ---
 
-## 模块规划
+## 分层策略
+
+将 Spring Boot 工作拆分为两个层次：
+
+```text
+┌─────────────────────────────────────────┐
+│  业务逻辑层（P3/P4 实现）                 │
+│  权限模型 / 文件保护 / 操作日志 / 用户管理 │
+├─────────────────────────────────────────┤
+│  基础设施层（P2 实现）                    │
+│  实例注册 / API Key 绑定 / Agent 通信     │
+├─────────────────────────────────────────┤
+│  项目骨架（P2 实现）                      │
+│  模块划分 / 数据库 / 配置                 │
+└─────────────────────────────────────────┘
+```
+
+### 为什么基础设施必须先做
+
+当前 Go API 采用单实例单 key 模型，无法支持多 MC 服务器实例场景。
+
+基础设施层的三个要素是 Spring Boot 存在的"脊柱"：
+
+| 要素 | 为什么必须先做 |
+|------|----------------|
+| **实例注册** | 多实例场景下，业务端需要知道有哪些 MC 服务器可操作 |
+| **API Key 绑定** | 每个实例持有独立 Key，Spring Boot 需管理实例→Key 的映射关系 |
+| **Agent 通信** | Spring Boot 与 Go API 的唯一通道，没有它一切业务接口都是空中楼阁 |
+
+三者共同回答一个核心问题：**业务端如何知道自己应该用哪个 API Key 调用哪个 MC 服务器。**
+
+---
+
+## P2 模块规划
 
 ```text
 panel/backend
 
-├─auth
-├─user
-├─role
-├─server
-├─resource
-├─audit
-└─agent
+├─config          # 安全配置
+├─entity          # 实例实体
+├─repository      # 数据访问
+├─service         # 实例管理 + Key 生成
+├─controller      # 实例管理 REST API
+└─agent           # Go API HTTP 客户端
+```
+
+P2 聚焦于让 Spring Boot 能够注册实例、管理 Key、并通过 AgentClient 与 Go API 通信。
+
+---
+
+## P2 数据库规划
+
+仅建基础设施表：
+
+```sql
+-- server_instances：MC 实例注册表
+CREATE TABLE server_instances (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name            VARCHAR(64)  NOT NULL,
+    server_type     VARCHAR(32)  NOT NULL,
+    mc_version      VARCHAR(16)  NOT NULL,
+    host            VARCHAR(255) NOT NULL,
+    port            INT          NOT NULL DEFAULT 25560,
+    api_key         VARCHAR(64)  NOT NULL,
+    rcon_host       VARCHAR(255),
+    rcon_port       INT,
+    status          VARCHAR(16)  DEFAULT 'stopped',
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+延后到 P3/P4 的表：
+
+```text
+users
+roles
+user_role
+protected_resource
+operation_logs
 ```
 
 ---
 
-## 数据库规划
+## P2 基础设施 API
 
-初始核心表：
-
-```text
-users
-
-roles
-
-user_role
-
-servers
-
-protected_resource
-
-operation_logs
-```
+| 接口 | 用途 |
+|------|------|
+| `POST /api/admin/instances` | Root 创建 MC 实例并自动生成/绑定 API Key |
+| `GET /api/admin/instances` | 列出所有已注册实例 |
+| `GET /api/admin/instances/{id}` | 获取单个实例详情 |
+| `PUT /api/admin/instances/{id}` | 更新实例信息 |
+| `DELETE /api/admin/instances/{id}` | 删除实例并撤销 Key |
+| `POST /api/admin/instances/{id}/rotate-key` | 轮换某个实例的 API Key |
+| `GET /api/admin/instances/{id}/health` | 代理探测 Go API 健康状态（验证链路） |
 
 ---
 
@@ -844,26 +893,49 @@ operation_logs
 
 Spring Boot 不直接操作 Minecraft。
 
-统一通过 Agent：
+统一通过 AgentClient：
 
 ```text
 Spring Boot
     ↓
-Agent Client
+AgentClient（携带实例对应的 API Key）
     ↓
-Go API
+Go API（验证 Key → 执行操作）
+    ↓
+Minecraft Server
 ```
 
-调用：
+P2 阶段 AgentClient 最小实现：
 
-```http
-POST /api/server/start
-POST /api/server/stop
-POST /api/server/command
-GET  /api/server/status
+```text
+health()        → GET  /api/health
+startServer()   → POST /api/server/start
+stopServer()    → POST /api/server/stop
+restartServer() → POST /api/server/restart
+getStatus()     → GET  /api/server/status
+sendCommand()   → POST /api/command
 ```
 
-实现服务端管理。
+后续 P3/P4 扩展文件管理、玩家管理等接口。
+
+---
+
+## Go API 侧配合扩展
+
+| 扩展项 | 说明 |
+|--------|------|
+| 多 Key 支持 | `api_keys.txt` 替代单 key 文件，支持多个有效 Key |
+| `POST /api/auth/register-key` | Spring Boot 下发 Key 到 Go API |
+| `POST /api/auth/revoke-key` | Spring Boot 撤销 Key |
+
+---
+
+## P2 验证标准
+
+1. Spring Boot 启动成功，数据库自动建表
+2. 通过 API 创建实例，返回带 API Key 的实例信息
+3. 通过 `/health` 代理接口验证 Spring Boot → AgentClient → Go API 整条链路通畅
+4. Go API 日志确认收到携带正确 Bearer token 的请求
 
 ---
 
@@ -886,27 +958,43 @@ GET  /api/server/status
 
 ## P2
 
-* Spring Boot初始化
-* Go API扩展
-* 权限系统设计
-* 文件安全保护机制
-* 重要资源保护机制
+**基础设施层（架构搭建，详细方案见 [[springboot-infra-plan]]）：**
+
+* Spring Boot 项目骨架搭建
+* 实例注册与 API Key 绑定（server_instances 表）
+* AgentClient（Spring Boot → Go API 通信客户端）
+* Go API 多 Key 支持 + Key 注册/撤销接口
+* Spring Boot → Go API 通信链路验证
+
+**设计层（仅出方案，实现在 P3/P4）：**
+
+* 权限系统设计（见 [[panel-design]]）
+* 文件安全保护机制设计（见 [[panel-design]]）
+* 重要资源保护机制设计（见 [[panel-design]]）
 
 ---
 
 ## P3
 
+**业务逻辑实现 + 前端初始化：**
+
+* 用户/角色/权限 CRUD（users / roles / user_role 表）
+* 资源保护规则初始化（protected_resource 表）
+* 文件管理代理接口（Spring Boot 鉴权 → Go API 执行）
+* 操作日志（operation_logs 表）
+* Vue Panel 初始化
 * Dashboard
 * Console
-* File Manager
 
 ---
 
 ## P4
 
-* 用户管理
-* 实例管理
-* Docker SDK接入
+* File Manager
+* 用户管理 UI
+* 实例管理 UI
+* Docker SDK 接入
+* 玩家管理（kick / whitelist / op）
 
 ---
 
