@@ -810,17 +810,17 @@ POST /api/server/op
 
 ### 为什么基础设施必须先做
 
-当前 Go API 采用单实例单 key 模型，无法支持多 MC 服务器实例场景。
+Go API 每个容器内自行生成 Key，不需要改动。但多个容器意味着多个 Key，业务端需要知道"用哪个 Key 调哪个实例"。
 
 基础设施层的三个要素是 Spring Boot 存在的"脊柱"：
 
 | 要素 | 为什么必须先做 |
 |------|----------------|
-| **实例注册** | 多实例场景下，业务端需要知道有哪些 MC 服务器可操作 |
-| **API Key 绑定** | 每个实例持有独立 Key，Spring Boot 需管理实例→Key 的映射关系 |
+| **API Key 注册管理** | 用户从 docker logs 获取 Key 后，需在面板中命名注册，否则无法区分多个 Key |
+| **实例注册** | 多实例场景下，业务端需要知道有哪些 MC 服务器可操作，以及各自绑定哪个 Key |
 | **Agent 通信** | Spring Boot 与 Go API 的唯一通道，没有它一切业务接口都是空中楼阁 |
 
-三者共同回答一个核心问题：**业务端如何知道自己应该用哪个 API Key 调用哪个 MC 服务器。**
+Spring Boot **不管理 Docker 容器**——容器的创建/启动/停止由使用者自行操作。Spring Boot 只做 Key→实例的映射管理和 API 代理通信。
 
 ---
 
@@ -830,14 +830,12 @@ POST /api/server/op
 panel/backend
 
 ├─config          # 安全配置
-├─entity          # 实例实体
+├─entity          # ApiKey + ServerInstance 实体
 ├─repository      # 数据访问
-├─service         # 实例管理 + Key 生成
-├─controller      # 实例管理 REST API
+├─service         # Key 注册管理 + 实例管理
+├─controller      # Key 管理 + 实例管理 REST API
 └─agent           # Go API HTTP 客户端
 ```
-
-P2 聚焦于让 Spring Boot 能够注册实例、管理 Key、并通过 AgentClient 与 Go API 通信。
 
 ---
 
@@ -846,20 +844,31 @@ P2 聚焦于让 Spring Boot 能够注册实例、管理 Key、并通过 AgentCli
 仅建基础设施表：
 
 ```sql
--- server_instances：MC 实例注册表
+-- api_keys：API Key 注册表（用户从 Go API 获取 Key 后在面板中命名注册）
+CREATE TABLE api_keys (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name            VARCHAR(64)  NOT NULL,
+    key_value       VARCHAR(64)  NOT NULL,
+    status          VARCHAR(16)  DEFAULT 'active',
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+-- server_instances：MC 实例注册表（绑定已注册的 Key）
 CREATE TABLE server_instances (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
     name            VARCHAR(64)  NOT NULL,
-    server_type     VARCHAR(32)  NOT NULL,
-    mc_version      VARCHAR(16)  NOT NULL,
+    api_key_id      BIGINT       NOT NULL,
     host            VARCHAR(255) NOT NULL,
     port            INT          NOT NULL DEFAULT 25560,
-    api_key         VARCHAR(64)  NOT NULL,
+    server_type     VARCHAR(32)  NOT NULL,
+    mc_version      VARCHAR(16)  NOT NULL,
     rcon_host       VARCHAR(255),
     rcon_port       INT,
-    status          VARCHAR(16)  DEFAULT 'stopped',
+    status          VARCHAR(16)  DEFAULT 'unknown',
     created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
 );
 ```
 
@@ -877,30 +886,42 @@ operation_logs
 
 ## P2 基础设施 API
 
+### Key 管理
+
 | 接口 | 用途 |
 |------|------|
-| `POST /api/admin/instances` | Root 创建 MC 实例并自动生成/绑定 API Key |
+| `POST /api/admin/keys` | 注册 API Key（命名 + 粘贴从 Go API 获取的 Key 值） |
+| `GET /api/admin/keys` | 列出所有已注册 Key 及其绑定状态 |
+| `GET /api/admin/keys/{id}` | 获取单个 Key 详情 |
+| `DELETE /api/admin/keys/{id}` | 删除 Key（已绑定实例则拒绝） |
+| `POST /api/admin/keys/{id}/revoke` | 吊销 Key |
+
+### 实例管理
+
+| 接口 | 用途 |
+|------|------|
+| `POST /api/admin/instances` | 注册 MC 实例并绑定已有 Key |
 | `GET /api/admin/instances` | 列出所有已注册实例 |
 | `GET /api/admin/instances/{id}` | 获取单个实例详情 |
 | `PUT /api/admin/instances/{id}` | 更新实例信息 |
-| `DELETE /api/admin/instances/{id}` | 删除实例并撤销 Key |
-| `POST /api/admin/instances/{id}/rotate-key` | 轮换某个实例的 API Key |
+| `DELETE /api/admin/instances/{id}` | 删除实例（自动解绑 Key） |
+| `PUT /api/admin/instances/{id}/bind-key` | 更换实例绑定的 Key |
 | `GET /api/admin/instances/{id}/health` | 代理探测 Go API 健康状态（验证链路） |
 
 ---
 
 ## Agent 通信
 
-Spring Boot 不直接操作 Minecraft。
+Spring Boot 不直接操作 Minecraft，也不管理 Docker 容器。
 
-统一通过 AgentClient：
+统一通过 AgentClient 代理调用 Go API：
 
 ```text
 Spring Boot
     ↓
-AgentClient（携带实例对应的 API Key）
+AgentClient（从 DB 取出实例绑定的 Key，Bearer 方式携带）
     ↓
-Go API（验证 Key → 执行操作）
+Go API（单 Key 比对验证 → 执行操作）
     ↓
 Minecraft Server
 ```
@@ -916,26 +937,21 @@ getStatus()     → GET  /api/server/status
 sendCommand()   → POST /api/command
 ```
 
-后续 P3/P4 扩展文件管理、玩家管理等接口。
-
 ---
 
-## Go API 侧配合扩展
+## Go API 侧
 
-| 扩展项 | 说明 |
-|--------|------|
-| 多 Key 支持 | `api_keys.txt` 替代单 key 文件，支持多个有效 Key |
-| `POST /api/auth/register-key` | Spring Boot 下发 Key 到 Go API |
-| `POST /api/auth/revoke-key` | Spring Boot 撤销 Key |
+**不需要任何改动。** Go API 现有的 Key 生成 + 文件存储 + 控制台打印机制完全满足需求。使用者通过 `docker logs` 获取 Key 后到 Spring Boot 面板注册即可。
 
 ---
 
 ## P2 验证标准
 
-1. Spring Boot 启动成功，数据库自动建表
-2. 通过 API 创建实例，返回带 API Key 的实例信息
-3. 通过 `/health` 代理接口验证 Spring Boot → AgentClient → Go API 整条链路通畅
-4. Go API 日志确认收到携带正确 Bearer token 的请求
+1. Spring Boot 启动成功，数据库自动建表（`api_keys` + `server_instances`）
+2. `POST /api/admin/keys` 注册 Key 成功，重复注册被拒绝
+3. `POST /api/admin/instances` 创建实例并绑定 Key 成功
+4. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
+5. Key 换绑后，新 Key 立即生效
 
 ---
 
@@ -961,9 +977,11 @@ sendCommand()   → POST /api/command
 **基础设施层（架构搭建，详细方案见 [[springboot-infra-plan]]）：**
 
 * Spring Boot 项目骨架搭建
-* 实例注册与 API Key 绑定（server_instances 表）
+* API Key 注册管理（`api_keys` 表——用户命名 + 粘贴从 Go API 获取的 Key）
+* MC Server 实例注册（`server_instances` 表——绑定已注册的 Key）
 * AgentClient（Spring Boot → Go API 通信客户端）
-* Go API 多 Key 支持 + Key 注册/撤销接口
+* Go API **无需改动**（现有 Key 生成机制完全满足需求）
+* Spring Boot **不管理 Docker 容器**（由使用者自行操作）
 * Spring Boot → Go API 通信链路验证
 
 **设计层（仅出方案，实现在 P3/P4）：**

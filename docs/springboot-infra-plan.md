@@ -2,9 +2,24 @@
 
 ## 背景
 
-在 P2 阶段，需要初始化 Spring Boot 后端项目作为统一业务层。当前 Go API 采用单实例单 key 模型（文件存储 `api_key.txt`），无法支持多 MC 服务器实例场景。
+在 P2 阶段，需要初始化 Spring Boot 后端项目作为统一业务层，连接用户与多个 MC 服务器实例。
 
-Spring Boot 层的引入需要解决一个核心问题：**业务端如何知道自己应该用哪个 API Key 调用哪个 MC 服务器**。
+### 各方职责
+
+```text
+使用者                              Spring Boot                    Docker 容器
+───────                             ───────────                    ───────────
+自行创建 Docker 容器          ←    不管理容器生命周期        →   每个容器 = 1 个 Go API + 1 个 MC Server
+从控制台获取 API Key          ←    存储 Key → 实例映射      →   Go API 自行生成 Key（现有行为不改）
+在面板中注册 Key + 实例       ←    提供 Key/实例管理界面    →   Go API 只验证自己的那一个 Key
+通过面板操作 MC Server        ←    AgentClient 携带 Key 调用 →   Go API 执行操作
+```
+
+### 核心原则
+
+- **Go API 不需要任何改动**：现有的 Key 生成 + 文件存储 + 控制台打印机制完全满足需求
+- **Spring Boot 不管理 Docker 容器**：容器的创建、启动、停止由使用者自行操作
+- **Spring Boot 只做通信和管理**：存储 Key→实例的映射关系，通过 AgentClient 代理调用 Go API
 
 ---
 
@@ -18,7 +33,7 @@ Spring Boot 层的引入需要解决一个核心问题：**业务端如何知道
 │  权限模型 / 文件保护 / 操作日志 / 用户管理 │
 ├─────────────────────────────────────────┤
 │  基础设施层（P2 实现）                    │
-│  实例注册 / API Key 绑定 / Agent 通信     │
+│  API Key 注册管理 / 实例注册 / Agent 通信  │
 ├─────────────────────────────────────────┤
 │  项目骨架（P2 实现）                      │
 │  模块划分 / 数据库 / 配置                 │
@@ -30,7 +45,7 @@ Spring Boot 层的引入需要解决一个核心问题：**业务端如何知道
 | 理由 | 说明 |
 |------|------|
 | **Agent 通信是脊柱** | 没有 AgentClient，Spring Boot 无法与任何 Go API 通信，一切业务接口都是空中楼阁 |
-| **实例/Key 绑定是路由前提** | 多实例场景下，用户请求必须先路由到正确的 Go API，这需要实例注册表 |
+| **Key/实例绑定是路由前提** | 多实例场景下，用户请求必须先路由到正确的 Go API，这需要 Key 注册 + 实例注册 |
 | **验证链路** | 骨架 + 基础设施打通后，可以从 Spring Boot 一路调到 Go API `/api/health`，整条链路可验证 |
 | **减少返工** | 业务权限模型的精确边界可能在接入时调整，过早实现增加返工成本 |
 
@@ -39,34 +54,62 @@ Spring Boot 层的引入需要解决一个核心问题：**业务端如何知道
 ## 总体架构
 
 ```text
-用户
- ↓
-Vue Panel（P3）
- ↓
-Spring Boot ─── 业务权限控制（P3/P4）
- ├─ InstanceService  ←── 实例/Key 管理（P2）
- ├─ AgentClient      ←── Go API 通信（P2）
- ↓
-Go API（多实例，每个实例持有独立 API Key）
- ↓
-Minecraft Server
+使用者自行创建容器：
+  docker run ... shimu/minecraft-server:api-dev
+  → Go API 生成 Key 并打印到控制台
+  → docker logs <container> 查看 Key
+
+使用者到 Spring Boot 面板：
+  1. 注册 API Key（命名 + 粘贴 Key 值）
+  2. 注册 MC Server 实例（填写 host/port/类型/版本，绑定已注册的 Key）
+
+Spring Boot 内部：
+  AgentClient 从 DB 取出实例对应的 Key → Bearer 方式调用 Go API
+
+Docker 容器（每个实例一个）：
+  Go API（维持现有行为，只验证自己的那一个 Key）
+  Minecraft Server
 ```
 
-### 请求流
+### Key 生命周期
 
 ```text
-用户请求操作 MC 服务器
+使用者 docker run 启动容器
        ↓
-Spring Boot Controller（鉴权）
+Go API 首次启动 → 生成 UUID → 写入 api_key.txt → 打印到控制台
        ↓
-InstanceService（根据实例 ID 获取连接信息 + API Key）
+使用者 docker logs <container> 查看 Key，复制
        ↓
-AgentClient（携带 API Key 发起 HTTP 请求）
+使用者到 Spring Boot 面板 → POST /api/admin/keys（命名 + 粘贴 Key 值）
        ↓
-Go API（验证 API Key → 执行操作）
+使用者创建实例 → POST /api/admin/instances（绑定已注册的 Key）
        ↓
-Minecraft Server
+Spring Boot AgentClient 调用 Go API 时，从 DB 取出对应 Key，Bearer 方式携带
+       ↓
+Go API 中间件校验 Key（单 Key 比对），通过则执行操作
 ```
+
+### 关于 api_keys 独立建表的考量
+
+用户的核心诉求是：**在面板中为每个 Go API 生成的 Key 命名，便于识别和管理**。
+
+两种设计方案对比：
+
+| | 方案 A：api_keys 独立表（推荐） | 方案 B：Key 内联在 server_instances |
+|---|---|---|
+| **结构** | `api_keys` + `server_instances.api_key_id (FK)` | `server_instances.key_name + key_value` |
+| **Key 独立注册** | ✅ 可先注册 Key，后绑定实例 | ❌ 必须创建实例时才能录入 Key |
+| **Key 列表管理** | ✅ 独立列表，按名称搜索/筛选 | ❌ 必须通过实例间接查看 |
+| **实例删除后** | Key 记录保留，可绑定到新实例 | Key 随实例记录一同删除 |
+| **Key 轮换** | 更新 FK 指向新 Key 记录即可 | 直接改字段值，无历史记录 |
+| **复杂度** | 多一张表 + 一个 join | 简单 |
+
+**推荐方案 A**。理由：
+
+1. 用户工作流天然分两步——先从 docker logs 拿到 Key，再到面板注册。独立建表匹配这个心智模型
+2. Key 是独立资源，生命周期与实例解耦。删除一个实例不应丢失 Key 记录（万一还要用）
+3. 未来可扩展（Key 过期标记、使用统计、最后活跃时间等）而不影响实例表
+4. 多一张表的复杂度在基础设施阶段微不足道，但灵活性收益显著
 
 ---
 
@@ -82,15 +125,19 @@ panel/backend/
 │   │   └── SecurityConfig.java          # 基础安全配置
 │   │
 │   ├── entity/
+│   │   ├── ApiKey.java                  # API Key 实体
 │   │   └── ServerInstance.java          # MC 实例实体
 │   │
 │   ├── repository/
+│   │   ├── ApiKeyRepository.java
 │   │   └── ServerInstanceRepository.java
 │   │
 │   ├── service/
-│   │   └── InstanceService.java         # 实例 CRUD + Key 管理
+│   │   ├── ApiKeyService.java           # Key 注册/命名/删除
+│   │   └── InstanceService.java         # 实例 CRUD + Key 绑定
 │   │
 │   ├── controller/
+│   │   ├── ApiKeyController.java        # Key 管理 REST API
 │   │   └── InstanceController.java      # 实例管理 REST API
 │   │
 │   └── agent/
@@ -105,24 +152,41 @@ panel/backend/
 
 ## 数据库设计
 
-### P2 最小表集（仅基础设施）
+### P2 最小表集
 
-#### server_instances（实例表）
+#### api_keys（API Key 注册表）
+
+```sql
+CREATE TABLE api_keys (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name            VARCHAR(64)  NOT NULL,             -- 用户命名的标识，如 "1.12.2 Forge 生存服"
+    key_value       VARCHAR(64)  NOT NULL,             -- Go API 生成的 Key 值（UUID v4）
+    status          VARCHAR(16)  DEFAULT 'active',     -- active / revoked
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_key_value ON api_keys(key_value);
+```
+
+#### server_instances（MC 实例表）
 
 ```sql
 CREATE TABLE server_instances (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
-    name            VARCHAR(64)  NOT NULL,             -- 实例名称
+    name            VARCHAR(64)  NOT NULL,             -- 实例展示名称
+    api_key_id      BIGINT       NOT NULL,             -- FK → api_keys.id
+    host            VARCHAR(255) NOT NULL,             -- Go API 地址（容器名或 IP）
+    port            INT          NOT NULL DEFAULT 25560, -- Go API 端口
     server_type     VARCHAR(32)  NOT NULL,             -- vanilla/forge/fabric/neoforge/paper/purpur
     mc_version      VARCHAR(16)  NOT NULL,             -- MC 版本号
-    host            VARCHAR(255) NOT NULL,             -- Go API 地址
-    port            INT          NOT NULL DEFAULT 25560, -- Go API 端口
-    api_key         VARCHAR(64)  NOT NULL,             -- 与该实例通信的 API Key
-    rcon_host       VARCHAR(255),                      -- RCON 地址（可选）
-    rcon_port       INT,                               -- RCON 端口（可选）
-    status          VARCHAR(16)  DEFAULT 'stopped',    -- running/stopped/error
+    rcon_host       VARCHAR(255),                      -- RCON 地址（预留）
+    rcon_port       INT,                               -- RCON 端口（预留）
+    status          VARCHAR(16)  DEFAULT 'unknown',    -- unknown/running/stopped/error
     created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+    updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
 );
 
 CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
@@ -130,39 +194,57 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
 
 #### 字段说明
 
+**api_keys：**
+
 | 字段 | 说明 |
 |------|------|
-| `name` | 实例名称，如 `"1.12.2-forge-2"`，唯一 |
+| `name` | 用户为 Key 起的名称，如 `"1.12.2 Forge 生存服"` |
+| `key_value` | 从 Go API 容器日志中复制的 UUID，唯一 |
+| `status` | `active` = 正常使用中；`revoked` = 已废弃 |
+
+**server_instances：**
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 实例展示名称，如 `"1.12.2 Forge Survival"` |
+| `api_key_id` | 外键指向 `api_keys`，一个 Key 只能被一个实例绑定 |
+| `host` / `port` | Go API 的网络地址（Docker 网络中容器名即可作 host） |
 | `server_type` | 服务端类型，用于后续资源保护初始化 |
-| `mc_version` | MC 版本号，用于 JDK 选择和版本解析 |
-| `host` / `port` | Go API 的网络地址 |
-| `api_key` | Spring Boot 调用该实例 Go API 时携带的 Bearer token |
+| `mc_version` | MC 版本号，用于 JDK 选择 |
 | `rcon_host` / `rcon_port` | 预留 RCON 直连通道 |
-| `status` | 实例运行状态 |
+| `status` | 实例状态（通过 AgentClient 心跳更新） |
+
+#### 表关系
+
+```text
+api_keys (1) ──── (0..1) server_instances
+
+一个 Key 最多被一个实例使用（通过业务逻辑约束，不在 DB 层强制）
+一个实例必须绑定一个 Key（NOT NULL FK）
+```
 
 ---
 
 ## API 设计
 
-### 实例管理
+### 一、API Key 管理
 
-#### POST /api/admin/instances
+Key 管理独立于实例管理——用户先拿到 Go API 生成的 Key，在面板中注册命名，之后再创建实例时绑定。
 
-创建 MC 实例并自动生成 API Key。
+#### POST /api/admin/keys
+
+注册一个新的 API Key（用户粘贴从 Go API 控制台获取的 Key 并命名）。
 
 **请求：**
 
 ```json
 {
-    "name": "1.12.2-forge-2",
-    "server_type": "forge",
-    "mc_version": "1.12.2",
-    "host": "minecraft-server-2",
-    "port": 25560
+    "name": "1.12.2 Forge 生存服",
+    "key_value": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
 
-**响应：**
+**响应（201）：**
 
 ```json
 {
@@ -170,32 +252,28 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
     "status": "ok",
     "data": {
         "id": 1,
-        "name": "1.12.2-forge-2",
-        "server_type": "forge",
-        "mc_version": "1.12.2",
-        "host": "minecraft-server-2",
-        "port": 25560,
-        "api_key": "a1b2c3d4-...",
-        "status": "stopped",
-        "created_at": "2026-06-18T12:00:00Z"
+        "name": "1.12.2 Forge 生存服",
+        "status": "active",
+        "created_at": "2026-06-19T12:00:00Z"
     }
 }
 ```
 
-**逻辑：**
+> **安全设计：** `key_value` 是只写字段。创建时必须传入，但任何 API 响应均不返回完整值。
+> 列表/详情接口仅返回脱敏预览 `key_preview`（如 `a1b2****...****7890`），方便用户识别是哪个 Key。
 
-1. 生成 UUID v4 作为 API Key
-2. 将实例信息 + Key 写入 `server_instances` 表
-3. 调用 Go API `POST /api/auth/register-key` 将 Key 注册到对应实例（待 Go API 扩展该接口）
-4. 返回实例信息（含 Key）
+**校验规则：**
+
+- `key_value` 格式校验（UUID v4 格式）
+- `key_value` 唯一性校验（不允许重复注册同一个 Key）
 
 ---
 
-#### GET /api/admin/instances
+#### GET /api/admin/keys
 
-列出所有已注册的 MC 实例。
+列出所有已注册的 API Key 及其绑定状态。
 
-**响应：**
+**响应（200）：**
 
 ```json
 {
@@ -204,18 +282,100 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
     "data": [
         {
             "id": 1,
-            "name": "1.12.2-forge-2",
-            "server_type": "forge",
-            "mc_version": "1.12.2",
-            "host": "minecraft-server-2",
-            "port": 25560,
-            "api_key": "a1b2c3d4-...",
-            "status": "running",
-            "created_at": "2026-06-18T12:00:00Z"
+            "name": "1.12.2 Forge 生存服",
+            "key_preview": "a1b2****...****7890",
+            "status": "active",
+            "bound_instance": {
+                "id": 1,
+                "name": "1.12.2 Forge Survival"
+            },
+            "created_at": "2026-06-19T12:00:00Z"
+        },
+        {
+            "id": 2,
+            "name": "1.20.1 Fabric 创造服",
+            "key_preview": "b2c3****...****e5f6",
+            "status": "active",
+            "bound_instance": null,
+            "created_at": "2026-06-19T13:00:00Z"
         }
     ]
 }
 ```
+
+`bound_instance` 为 null 表示该 Key 尚未绑定到任何实例。
+
+---
+
+#### GET /api/admin/keys/{id}
+
+获取单个 Key 详情。与列表接口一致，仅返回 `key_preview` 脱敏值，不返回完整 `key_value`。
+
+**`key_preview` 格式：** 前4位 + `****...****` + 后4位，帮助用户识别 Key 而无需暴露完整值。
+
+---
+
+#### DELETE /api/admin/keys/{id}
+
+删除 Key 记录。
+
+**约束：** 如果该 Key 已被实例绑定，拒绝删除并提示先解绑。
+
+---
+
+#### POST /api/admin/keys/{id}/revoke
+
+标记 Key 为 `revoked` 状态（软删除，保留历史记录）。
+
+---
+
+### 二、MC Server 实例管理
+
+#### POST /api/admin/instances
+
+注册一个 MC Server 实例并绑定 API Key。
+
+**请求：**
+
+```json
+{
+    "name": "1.12.2 Forge Survival",
+    "api_key_id": 1,
+    "host": "mc-forge-1.12.2",
+    "port": 25560,
+    "server_type": "forge",
+    "mc_version": "1.12.2"
+}
+```
+
+**响应（201）：**
+
+```json
+{
+    "code": 201,
+    "status": "ok",
+    "data": {
+        "id": 1,
+        "name": "1.12.2 Forge Survival",
+        "host": "mc-forge-1.12.2",
+        "port": 25560,
+        "server_type": "forge",
+        "mc_version": "1.12.2",
+        "api_key": {
+            "id": 1,
+            "name": "1.12.2 Forge 生存服"
+        },
+        "status": "unknown",
+        "created_at": "2026-06-19T12:00:00Z"
+    }
+}
+```
+
+---
+
+#### GET /api/admin/instances
+
+列出所有已注册的 MC 实例。
 
 ---
 
@@ -227,49 +387,44 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
 
 #### PUT /api/admin/instances/{id}
 
-更新实例信息（host、port 等可变更字段，不包含 api_key）。
+更新实例信息（name、host、port、server_type、mc_version）。`api_key_id` 不可通过此接口修改，需使用专门的 Key 绑定接口。
 
 ---
 
 #### DELETE /api/admin/instances/{id}
 
-删除实例记录。同时调用 Go API 撤销该 Key。
+删除实例记录。对应的 API Key 自动解除绑定（Key 记录保留，`status` 不变）。
 
 ---
 
-#### POST /api/admin/instances/{id}/rotate-key
+#### PUT /api/admin/instances/{id}/bind-key
 
-轮换指定实例的 API Key。
+更换实例绑定的 API Key。
 
-**逻辑：**
-
-1. 生成新 Key
-2. 更新数据库
-3. 调用 Go API 注册新 Key / 撤销旧 Key
-4. 返回新 Key
-
-**响应：**
+**请求：**
 
 ```json
 {
-    "code": 200,
-    "status": "ok",
-    "data": {
-        "id": 1,
-        "api_key": "e5f6g7h8-..."
-    }
+    "api_key_id": 2
 }
 ```
 
+**逻辑：**
+
+1. 校验新 Key 存在且为 `active` 状态
+2. 旧 Key 解除绑定（仍保持 `active`，可被其他实例使用）
+3. 新 Key 绑定到该实例
+4. 后续 AgentClient 调用自动使用新 Key
+
 ---
 
-### 健康探测（验证链路）
+### 三、健康探测
 
 #### GET /api/admin/instances/{id}/health
 
-通过 AgentClient 代理调用 Go API 的 `/api/health`，验证整条通信链路。
+通过 AgentClient 代理调用 Go API 的 `/api/health`，验证通信链路。
 
-**响应：**
+**响应（200）：**
 
 ```json
 {
@@ -277,10 +432,19 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
     "status": "ok",
     "data": {
         "instance_id": 1,
-        "instance_name": "1.12.2-forge-2",
-        "go_api_health": "ok",
-        "go_api_version": "1.0.0"
+        "instance_name": "1.12.2 Forge Survival",
+        "go_api_health": "ok"
     }
+}
+```
+
+**失败时（Go API 不可达）：**
+
+```json
+{
+    "code": 502,
+    "status": "error",
+    "message": "无法连接到 Go API: connection refused"
 }
 ```
 
@@ -290,9 +454,20 @@ CREATE UNIQUE INDEX idx_instance_name ON server_instances(name);
 
 ### 职责
 
-AgentClient 是 Spring Boot 与 Go API 之间的唯一通信通道。所有对 MC 服务器的操作都经过它。
+AgentClient 是 Spring Boot 与 Go API 之间的唯一通信通道。
 
-### 核心方法
+### 调用方式
+
+```java
+// AgentClient 根据 ServerInstance 自动解析连接信息 + Key
+AgentClient.health(instance);
+// → Join api_keys → 获取 key_value
+// → 从 ServerInstance 获取 host:port
+// → 发起 GET http://host:port/api/health
+// → Header: Authorization: Bearer <key_value>
+```
+
+### 核心方法（P2 最小集）
 
 ```java
 public class AgentClient {
@@ -309,11 +484,9 @@ public class AgentClient {
     // 发送指令
     public APIResponse sendCommand(ServerInstance instance, String command);
 
-    // 文件管理（后续 P3/P4 扩展）
-    public List<FileInfo> listFiles(ServerInstance instance, String path);
-    public String readFile(ServerInstance instance, String path);
-    public APIResponse writeFile(ServerInstance instance, String path, String content);
-    public APIResponse deleteFile(ServerInstance instance, String path, boolean force);
+    // 文件管理（P3/P4 扩展）
+    // public List<FileInfo> listFiles(ServerInstance instance, String path);
+    // public String readFile(ServerInstance instance, String path);
     // ...
 }
 ```
@@ -322,38 +495,27 @@ public class AgentClient {
 
 | 要点 | 说明 |
 |------|------|
-| **自动附加 Bearer token** | 从 `ServerInstance.api_key` 读取，注入 `Authorization: Bearer <key>` |
-| **连接池** | 使用 `HttpClient` 连接池，按 instance 复用连接 |
+| **自动附加 Bearer token** | 通过 `instance.api_key.key_value` 获取 Key，注入 `Authorization: Bearer <key>` |
+| **连接池** | 使用 `HttpClient` 连接池，按 host 复用连接 |
 | **超时与重试** | 连接超时 5s，读超时 30s，可重试的 5xx 错误最多重试 2 次 |
 | **错误映射** | Go API 的 403/404/500 映射为对应的 Spring Boot 异常 |
-| **健康状态同步** | 每次调用后更新 `server_instances.status`（可选，异步） |
+| **状态同步** | 每次调用后更新 `server_instances.status`（异步，可选） |
 
 ---
 
-## Go API 侧需要的配合扩展
+## Go API 侧
 
-Spring Boot 基础设施需要 Go API 侧提供以下支持（在 P2 中同步完成）：
+### 不需要任何改动
 
-| 扩展项 | 说明 |
-|--------|------|
-| `POST /api/auth/register-key` | 接收 Spring Boot 下发的 API Key 并写入本地 `api_key.txt` |
-| `POST /api/auth/revoke-key` | 撤销指定 Key |
-| 多 Key 支持 | 从单 key 模型改为 key 列表模型，支持多个有效 Key |
+Go API 现有的 Key 管理机制完全满足需求：
 
-### 多 Key 模型设计
-
-```go
-// 当前: api_key.txt 存单个 key
-// api-key=<uuid>
-
-// 改为: api_keys.txt 存多个 key（每行一个）
-// <uuid1>
-// <uuid2>
-
-func ValidateAPIKey(token string) bool {
-    // 遍历所有已注册的 key，任一匹配即通过
-}
+```text
+首次启动 → 生成 UUID → 写入 api_key.txt → 打印到控制台
+后续启动 → 从 api_key.txt 读取
+请求校验 → 单 Key 字符串比对
 ```
+
+使用者通过 `docker logs` 获取 Key 后到 Spring Boot 面板注册即可。
 
 ---
 
@@ -364,25 +526,27 @@ func ValidateAPIKey(token string) bool {
 - [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security
 - [ ] `PanelApplication.java`：启动类
 - [ ] `SecurityConfig.java`：基础安全配置（Admin API 需要认证）
-- [ ] `ServerInstance.java`：实体
-- [ ] `ServerInstanceRepository.java`：数据访问
-- [ ] `InstanceService.java`：实例 CRUD + Key 生成/轮换
-- [ ] `InstanceController.java`：REST 接口
-- [ ] `AgentClient.java`：Go API HTTP 客户端
+- [ ] `ApiKey.java` / `ServerInstance.java`：实体
+- [ ] `ApiKeyRepository.java` / `ServerInstanceRepository.java`：数据访问
+- [ ] `ApiKeyService.java`：Key 注册/命名/查询/删除/吊销
+- [ ] `InstanceService.java`：实例 CRUD + Key 绑定/换绑
+- [ ] `ApiKeyController.java`：Key 管理 REST API
+- [ ] `InstanceController.java`：实例管理 REST API
+- [ ] `AgentClient.java`：Go API HTTP 客户端 + 配置
 - [ ] `application.yml`：配置
 
 ### Go API 侧
 
-- [ ] 多 Key 支持（`api_keys.txt` 替代 `api_key.txt`）
-- [ ] `POST /api/auth/register-key` 接口
-- [ ] `POST /api/auth/revoke-key` 接口
+- [ ] **无需改动**（现有 Key 生成 + 文件存储机制已完全满足需求）
 
 ### 验证标准
 
-1. Spring Boot 启动成功，数据库自动建表
-2. `POST /api/admin/instances` 创建实例并返回 API Key
-3. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
-4. Go API 日志显示来自 Spring Boot 的请求携带了正确的 Bearer token
+1. Spring Boot 启动成功，数据库自动建表（`api_keys` + `server_instances`）
+2. `POST /api/admin/keys` 注册 Key 成功，重复注册被拒绝
+3. `POST /api/admin/instances` 创建实例并绑定 Key 成功
+4. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
+5. Go API 日志确认收到携带正确 Bearer token 的请求
+6. Key 换绑后，新 Key 立即生效
 
 ---
 
@@ -397,6 +561,7 @@ func ValidateAPIKey(token string) bool {
 | 玩家管理接口 | 纯业务功能 |
 | Vue Panel | P3 开始 |
 | Dashboard / Console | P3 开始 |
+| Docker SDK 接入 | Spring Boot 不管理容器生命周期 |
 
 ---
 
