@@ -225,6 +225,75 @@ api_keys (1) ──── (0..1) server_instances
 
 ---
 
+## 数据库静态加密
+
+### 背景
+
+`api_keys.key_value` 存储的是 Go API 的访问凭证。若服务器被入侵、数据库文件被窃取，攻击者可直接使用明文 Key 调用 Go API 控制所有 MC 服务器。
+
+即使 Go API 仅内网监听、有防火墙保护，内网横向移动仍是常见攻击路径。需要在数据库层面做静态加密。
+
+### 方案：AES-256-GCM 应用层加密
+
+加密密钥通过环境变量注入，不落盘：
+
+```
+环境变量 DB_ENCRYPT_KEY → Spring Boot 加载 → AES-256-GCM
+
+写入：明文 UUID → AES-GCM 加密 → Base64 密文 → 写入 key_value 列
+读取：密文 ← AES-GCM 解密 → 明文 UUID → AgentClient 使用
+```
+
+### 为什么不依赖数据库 TDE
+
+MySQL TDE 需要企业版，H2 不支持。应用层加密不绑定数据库，迁移无缝。
+
+### 实现：JPA AttributeConverter
+
+```java
+@Converter
+public class KeyValueEncryptor implements AttributeConverter<String, String> {
+
+    private final SecretKey key;
+
+    public KeyValueEncryptor(@Value("${app.db-encrypt-key}") String base64Key) {
+        byte[] decoded = Base64.getDecoder().decode(base64Key);
+        this.key = new SecretKeySpec(decoded, "AES");
+    }
+
+    @Override
+    public String convertToDatabaseColumn(String plain) {
+        if (plain == null) return null;
+        return AES256GCM.encrypt(plain, key);  // → Base64 密文
+    }
+
+    @Override
+    public String convertToEntityAttribute(String cipher) {
+        if (cipher == null) return null;
+        return AES256GCM.decrypt(cipher, key);  // → 明文 UUID
+    }
+}
+```
+
+实体上只需一行：
+
+```java
+@Column(name = "key_value", nullable = false)
+@Convert(converter = KeyValueEncryptor.class)
+private String keyValue;
+```
+
+### 加密密钥管理
+
+| 环境 | 注入方式 |
+|------|----------|
+| 开发 | `application.yml` 中的 `app.db-encrypt-key`（或 `.env`） |
+| 生产 | 环境变量 `DB_ENCRYPT_KEY`（Docker 启动时注入，不写进任何配置文件） |
+
+**P2 即实施。** 成本极低（一个 Converter），越晚加密越需要写数据迁移脚本。
+
+---
+
 ## API 设计
 
 ### 一、API Key 管理
@@ -418,6 +487,81 @@ Key 管理独立于实例管理——用户先拿到 Go API 生成的 Key，在�
 
 ---
 
+#### PUT /api/admin/instances/{id}/refresh-key
+
+刷新实例的 API Key——调用 Go API 的 `POST /api/auth/refresh` 获取新 Key，原子性地完成旧 Key 吊销 + 新 Key 注册 + 重新绑定。
+
+**权限：** 仅 Root 角色（涉及凭证替换，前端需有二次确认弹窗）
+
+**请求体：** 无（全自动，Spring Boot 代理调用 Go API 的 refresh 接口）
+
+**服务端逻辑：**
+
+1. 校验当前用户为 Root 角色
+2. 查找 instance → 获取当前 `api_key`
+3. AgentClient 携带当前 Key 调用 Go API `POST /api/auth/refresh`
+4. Go API 生成新 Key 并返回（旧 Key 在 Go API 侧立即失效，见 [[api-doc]] 第 281 行）
+5. 事务内：
+   - 旧 `api_keys` 记录 → `status = revoked`
+   - 创建新 `api_keys` 记录（`name` 沿用旧名，`key_value` 为新 Key，加密存储）
+   - 更新 `server_instances.api_key_id` → 指向新 Key
+6. 事务提交
+
+**Go API 已有此能力：**
+
+```
+POST /api/auth/refresh
+→ 旧 Key 立即失效
+→ 返回 { "data": { "api_key": "新 UUID" } }
+```
+
+Spring Boot 无需额外扩展 Go API，直接调用即可。
+
+**响应（200）：**
+
+```json
+{
+    "code": 200,
+    "status": "ok",
+    "message": "API Key 已刷新，旧 Key 已吊销",
+    "data": {
+        "instance_id": 1,
+        "previous_key": {
+            "id": 1,
+            "key_preview": "a1b2****...****7890",
+            "status": "revoked"
+        },
+        "new_key": {
+            "id": 3,
+            "key_preview": "f9e8****...****3210",
+            "status": "active"
+        }
+    }
+}
+```
+
+**失败场景：**
+
+| 场景 | HTTP Code |
+|------|-----------|
+| 非 Root 用户 | 403 |
+| 实例不存在 | 404 |
+| Go API 不可达（AgentClient 调用超时） | 502 |
+| Go API 返回错误（如旧 Key 已失效） | 502，message 中包含 Go API 错误信息 |
+
+**与 `bind-key` 的区别：**
+
+| | `PUT .../bind-key` | `PUT .../refresh-key` |
+|---|---|---|
+| 语义 | 绑定一个已有 Key | **换一个新 Key 并吊销旧的** |
+| 权限 | Admin 可用 | **仅 Root** |
+| 新 Key 来源 | 用户提前在 `/api/admin/keys` 注册好的 | **Go API 现场生成** |
+| 旧 Key 处理 | 不解绑（仍 active） | **标记 revoked** |
+| 请求体 | `{"api_key_id": 2}` | 无（全自动） |
+| 与 Go API 交互 | 无（仅 DB 操作） | AgentClient 调 `POST /api/auth/refresh` |
+
+---
+
 ### 三、健康探测
 
 #### GET /api/admin/instances/{id}/health
@@ -484,6 +628,9 @@ public class AgentClient {
     // 发送指令
     public APIResponse sendCommand(ServerInstance instance, String command);
 
+    // API Key 管理（调用 Go API 刷新 Key）
+    public RefreshKeyResponse refreshKey(ServerInstance instance);
+
     // 文件管理（P3/P4 扩展）
     // public List<FileInfo> listFiles(ServerInstance instance, String path);
     // public String readFile(ServerInstance instance, String path);
@@ -525,27 +672,28 @@ Go API 现有的 Key 管理机制完全满足需求：
 
 - [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security
 - [ ] `PanelApplication.java`：启动类
-- [ ] `SecurityConfig.java`：基础安全配置（Admin API 需要认证）
+- [ ] `SecurityConfig.java`：基础安全配置（Admin API 需要认证 + Root 角色区分）
+- [ ] `KeyValueEncryptor.java`：AES-256-GCM `AttributeConverter`（DB 静态加密）
 - [ ] `ApiKey.java` / `ServerInstance.java`：实体
 - [ ] `ApiKeyRepository.java` / `ServerInstanceRepository.java`：数据访问
 - [ ] `ApiKeyService.java`：Key 注册/命名/查询/删除/吊销
-- [ ] `InstanceService.java`：实例 CRUD + Key 绑定/换绑
+- [ ] `InstanceService.java`：实例 CRUD + Key 绑定/换绑 + 刷新
 - [ ] `ApiKeyController.java`：Key 管理 REST API
-- [ ] `InstanceController.java`：实例管理 REST API
-- [ ] `AgentClient.java`：Go API HTTP 客户端 + 配置
-- [ ] `application.yml`：配置
+- [ ] `InstanceController.java`：实例管理 REST API + refresh-key 端点
+- [ ] `AgentClient.java`：Go API HTTP 客户端（含 `refreshKey()` 方法，调用 `POST /api/auth/refresh`）
+- [ ] `application.yml`：配置（含 `app.db-encrypt-key`）
 
 ### Go API 侧
 
-- [ ] **无需改动**（现有 Key 生成 + 文件存储机制已完全满足需求）
+- [ ] **无需改动**（Key 生成 + 刷新接口 `POST /api/auth/refresh` 均已存在，见 [[api-doc]]）
 
 ### 验证标准
 
 1. Spring Boot 启动成功，数据库自动建表（`api_keys` + `server_instances`）
-2. `POST /api/admin/keys` 注册 Key 成功，重复注册被拒绝
+2. `POST /api/admin/keys` 注册 Key 成功，DB 中 `key_value` 为密文存储
 3. `POST /api/admin/instances` 创建实例并绑定 Key 成功
 4. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
-5. Go API 日志确认收到携带正确 Bearer token 的请求
+5. `PUT /api/admin/instances/{id}/refresh-key` 调 Go API `POST /api/auth/refresh` → 新 Key 注册 → 旧 Key 吊销 → 实例绑定新 Key
 6. Key 换绑后，新 Key 立即生效
 
 ---

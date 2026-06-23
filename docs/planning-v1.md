@@ -882,6 +882,12 @@ protected_resource
 operation_logs
 ```
 
+### 数据库静态加密
+
+`api_keys.key_value` 使用 **AES-256-GCM** 应用层加密存储（JPA `AttributeConverter`），加密密钥通过环境变量 `DB_ENCRYPT_KEY` 注入。
+
+详细实现见 [[springboot-infra-plan]]。
+
 ---
 
 ## P2 基础设施 API
@@ -906,6 +912,7 @@ operation_logs
 | `PUT /api/admin/instances/{id}` | 更新实例信息 |
 | `DELETE /api/admin/instances/{id}` | 删除实例（自动解绑 Key） |
 | `PUT /api/admin/instances/{id}/bind-key` | 更换实例绑定的 Key |
+| `PUT /api/admin/instances/{id}/refresh-key` | **仅 Root**，调 Go API `POST /api/auth/refresh` 自动刷新 Key（旧 Key 吊销），需前端二次确认 |
 | `GET /api/admin/instances/{id}/health` | 代理探测 Go API 健康状态（验证链路） |
 
 ---
@@ -935,23 +942,25 @@ stopServer()    → POST /api/server/stop
 restartServer() → POST /api/server/restart
 getStatus()     → GET  /api/server/status
 sendCommand()   → POST /api/command
+refreshKey()    → POST /api/auth/refresh
 ```
 
 ---
 
 ## Go API 侧
 
-**不需要任何改动。** Go API 现有的 Key 生成 + 文件存储 + 控制台打印机制完全满足需求。使用者通过 `docker logs` 获取 Key 后到 Spring Boot 面板注册即可。
+**不需要任何改动。** Go API 现有的 Key 生成 + `POST /api/auth/refresh` 刷新接口均已满足需求（见 [[api-doc]]）。使用者通过 `docker logs` 获取 Key 后到 Spring Boot 面板注册即可。
 
 ---
 
 ## P2 验证标准
 
 1. Spring Boot 启动成功，数据库自动建表（`api_keys` + `server_instances`）
-2. `POST /api/admin/keys` 注册 Key 成功，重复注册被拒绝
+2. `POST /api/admin/keys` 注册 Key 成功，DB 中 `key_value` 为密文存储
 3. `POST /api/admin/instances` 创建实例并绑定 Key 成功
 4. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
-5. Key 换绑后，新 Key 立即生效
+5. `PUT /api/admin/instances/{id}/refresh-key` 调 Go API 刷新 Key → 旧 Key 吊销 → 新 Key 生效
+6. Key 换绑后，新 Key 立即生效
 
 ---
 
@@ -979,8 +988,10 @@ sendCommand()   → POST /api/command
 * Spring Boot 项目骨架搭建
 * API Key 注册管理（`api_keys` 表——用户命名 + 粘贴从 Go API 获取的 Key）
 * MC Server 实例注册（`server_instances` 表——绑定已注册的 Key）
-* AgentClient（Spring Boot → Go API 通信客户端）
-* Go API **无需改动**（现有 Key 生成机制完全满足需求）
+* 数据库静态加密（AES-256-GCM `AttributeConverter`，密钥通过 `DB_ENCRYPT_KEY` 环境变量注入）
+* `PUT /api/admin/instances/{id}/refresh-key`（仅 Root，自动调 Go API `POST /api/auth/refresh` 刷新 Key）
+* AgentClient（Spring Boot → Go API 通信客户端，含 `refreshKey()` 方法）
+* Go API **无需改动**（Key 生成 + `POST /api/auth/refresh` 均已存在）
 * Spring Boot **不管理 Docker 容器**（由使用者自行操作）
 * Spring Boot → Go API 通信链路验证
 
