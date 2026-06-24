@@ -5,6 +5,7 @@ services:
     ports:
       - "25565:25565"
       - "25560:25560"
+    restart: always
     environment:
       MC_VERSION: "1.12.2"
       SERVER_TYPE: forge
