@@ -3,8 +3,9 @@ services:
     image: shimu/minecraft-server:api-dev
     container_name: minecraft-server-1.12.2-forge-2
     ports:
-      - "25565:25565"
-      - "25560:25560"
+      - "${MC_PORT:-25565}:25565"
+      - # 这是 golang 监听的端口，不建议挂载
+      - "${API_PORT}:25560"
     restart: always
     environment:
       MC_VERSION: "1.12.2"
@@ -19,4 +20,7 @@ services:
       # By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
       EULA: true
     volumes:
-      - /home/shimu/IdeaProjects/minecraft-server-docker/minecraft:/minecraft
+      - ${DATA_PATH}/minecraft:/minecraft
+networks:
+  mc-network:
+    external: true

@@ -12,9 +12,6 @@ minecraft/
 .vscode/
 *.iml
 
-# Environment
-.env
-
 # OS
 .DS_Store
 Thumbs.db
