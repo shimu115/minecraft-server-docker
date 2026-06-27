@@ -4,8 +4,8 @@ services:
     container_name: minecraft-server-1.12.2-forge-2
     ports:
       - "${MC_PORT:-25565}:25565"
-      - # 这是 golang 监听的端口，不建议挂载
-      - "${API_PORT}:25560"
+      # 这是 golang 监听的端口，不建议挂载
+      # - "${API_PORT:-25560}:25560"
     restart: always
     environment:
       MC_VERSION: "1.12.2"
@@ -21,6 +21,10 @@ services:
       EULA: true
     volumes:
       - ${DATA_PATH}/minecraft:/minecraft
+    networks:
+      mc-network:
+        aliases:
+          - mc-server-1
 networks:
   mc-network:
-    external: true
+    name: mc-network
