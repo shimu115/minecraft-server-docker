@@ -780,14 +780,17 @@ POST /api/server/op
 
 ---
 
-# 十、Spring Boot 面板基础设施初始化（P2）
+# 十、P2 全栈基础设施（Spring Boot + Vue 前端）
 
 ## 目标
 
-初始化 Spring Boot 后端项目，优先构建基础设施层（实例管理 + API Key 绑定 + Agent 通信），
-业务权限逻辑延后到 P3/P4 实现。
+完成 Spring Boot 后端 + Vue 前端的基础设施搭建与全链路打通。
+P2 聚焦于 **API Key 管理 + 实例管理 + Agent 通信** 三大核心能力的可用化交付，
+包含后端接口和前端交互界面。业务权限逻辑延后到 P3+ 实现。
 
-详细方案见：[[springboot-infra-plan]]
+**部署方式：** P2 阶段 Spring Boot 内嵌 Vue 静态资源，同容器单端口部署（详见 [[frontend-plan]]）。
+
+详细方案见：[[springboot-infra-plan]]（后端）、[[frontend-plan]]（前端）
 
 ---
 
@@ -827,14 +830,22 @@ Spring Boot **不管理 Docker 容器**——容器的创建/启动/停止由使
 ## P2 模块规划
 
 ```text
-panel/backend
-
-├─config          # 安全配置
-├─entity          # ApiKey + ServerInstance 实体
-├─repository      # 数据访问
-├─service         # Key 注册管理 + 实例管理
-├─controller      # Key 管理 + 实例管理 REST API
-└─agent           # Go API HTTP 客户端
+panel/
+├── backend/                    # Spring Boot（[[springboot-infra-plan]]）
+│   ├── config                  # 安全配置（Spring Security + JWT）
+│   ├── entity                  # ApiKey + ServerInstance 实体
+│   ├── repository              # 数据访问
+│   ├── service                 # Key 注册管理 + 实例管理
+│   ├── controller              # Key 管理 + 实例管理 REST API
+│   └── agent                   # Go API HTTP 客户端（AgentClient）
+│
+└── web/                        # Vue 3 前端（[[frontend-plan]]）
+    ├── views/                  # 页面（Login / Dashboard / Keys / Instances）
+    │   ├── keys/               # Key 列表 + 注册
+    │   └── instances/          # 实例列表 + 注册 + 详情
+    ├── components/             # 公共组件（布局 / 确认弹窗 / 状态标签）
+    ├── api/                    # axios 客户端 + API 模块
+    └── router/                 # 路由配置
 ```
 
 ---
@@ -844,6 +855,15 @@ panel/backend
 仅建基础设施表：
 
 ```sql
+-- users：用户表（P2 最小实现，role 字段区分 ROOT/ADMIN/USER）
+CREATE TABLE users (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    username        VARCHAR(64)  NOT NULL,
+    password_hash   VARCHAR(255) NOT NULL,
+    role            VARCHAR(16)  NOT NULL DEFAULT 'USER',
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
 -- api_keys：API Key 注册表（用户从 Go API 获取 Key 后在面板中命名注册）
 CREATE TABLE api_keys (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -870,12 +890,34 @@ CREATE TABLE server_instances (
     updated_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
 );
+
+-- user_instances：用户-实例绑定表（多对多）
+CREATE TABLE user_instances (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id         BIGINT NOT NULL,
+    instance_id     BIGINT NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id)    REFERENCES users(id),
+    FOREIGN KEY (instance_id) REFERENCES server_instances(id),
+    UNIQUE (user_id, instance_id)
+);
 ```
 
-延后到 P3/P4 的表：
+### 实例级访问控制
 
 ```text
-users
+ROOT  → 不查 user_instances，允许访问所有实例
+ADMIN → 查 user_instances，仅允许访问绑定的实例
+USER  → 查 user_instances，仅允许访问绑定的实例
+```
+
+例如：用户 a 绑定 mc1，则只能查看/操作 mc1；若同时绑定 mc2，则可操作两个。Root 不受此限制。
+
+实现方式：`@RequireInstanceAccess` 注解 + AOP 切面，Controller 方法上加注即可。
+
+延后到 P3+ 的表：
+
+```text
 roles
 user_role
 protected_resource
@@ -891,6 +933,23 @@ operation_logs
 ---
 
 ## P2 基础设施 API
+
+**统一响应格式：** `{"code": int, "msg": string, "data": T}`。`code=200` 表示成功。错误码通过 `ErrorCode` 枚举分段管理（1xxx 通用、2xxx 认证、3xxx Key、4xxx 实例、5xxx 用户、6xxx Agent），code 与 msg 强绑定杜绝重复。详见 [[springboot-infra-plan]]。
+
+### 认证
+
+| 接口 | 用途 |
+|------|------|
+| `POST /api/auth/login` | 用户名密码登录，返回 JWT |
+
+### 用户管理（仅 Root）
+
+| 接口 | 用途 |
+|------|------|
+| `POST /api/admin/users` | 创建用户（username + password + role） |
+| `GET /api/admin/users` | 列出所有用户 |
+| `PUT /api/admin/users/{id}/bind-instance` | 为用户绑定 MC 实例（加入 user_instances） |
+| `DELETE /api/admin/users/{id}/unbind-instance` | 解除用户的实例绑定 |
 
 ### Key 管理
 
@@ -914,6 +973,17 @@ operation_logs
 | `PUT /api/admin/instances/{id}/bind-key` | 更换实例绑定的 Key |
 | `PUT /api/admin/instances/{id}/refresh-key` | **仅 Root**，调 Go API `POST /api/auth/refresh` 自动刷新 Key（旧 Key 吊销），需前端二次确认 |
 | `GET /api/admin/instances/{id}/health` | 代理探测 Go API 健康状态（验证链路） |
+
+### 实例服务端控制（前端 Console 使用，Spring Boot 代理转发 Go API）
+
+| 接口 | 用途 |
+|------|------|
+| `POST /api/server/{id}/start` | 启动 MC 服务端 |
+| `POST /api/server/{id}/stop` | 停止 MC 服务端 |
+| `POST /api/server/{id}/restart` | 重启 MC 服务端 |
+| `GET /api/server/{id}/status` | 获取服务端状态（运行/玩家数/版本/uptime） |
+| `POST /api/server/{id}/command` | 发送 MC 指令 |
+| `GET /api/server/{id}/logs` | SSE 日志流（代理转发 Go API `/api/logs`） |
 
 ---
 
@@ -983,19 +1053,24 @@ refreshKey()    → POST /api/auth/refresh
 
 ## P2
 
-**基础设施层（架构搭建，详细方案见 [[springboot-infra-plan]]）：**
+**全栈基础设施（Spring Boot + Vue 前端，详细方案见 [[springboot-infra-plan]] 和 [[frontend-plan]]）：**
 
-* Spring Boot 项目骨架搭建
+* Spring Boot 项目骨架搭建 + 安全配置（Spring Security + JWT + ROOT/ADMIN/USER 角色）
+* 用户管理（`users` 表）+ 实例级访问控制（`user_instances` 多对多绑定 + `@RequireInstanceAccess` AOP）
+* 数据库静态加密（AES-256-GCM `AttributeConverter`）
 * API Key 注册管理（`api_keys` 表——用户命名 + 粘贴从 Go API 获取的 Key）
 * MC Server 实例注册（`server_instances` 表——绑定已注册的 Key）
-* 数据库静态加密（AES-256-GCM `AttributeConverter`，密钥通过 `DB_ENCRYPT_KEY` 环境变量注入）
-* `PUT /api/admin/instances/{id}/refresh-key`（仅 Root，自动调 Go API `POST /api/auth/refresh` 刷新 Key）
-* AgentClient（Spring Boot → Go API 通信客户端，含 `refreshKey()` 方法）
-* Go API **无需改动**（Key 生成 + `POST /api/auth/refresh` 均已存在）
+* `PUT /api/admin/instances/{id}/refresh-key`（仅 Root，调 Go API `POST /api/auth/refresh`）
+* AgentClient（Spring Boot → Go API 通信客户端）
+* Go API **无需改动**
 * Spring Boot **不管理 Docker 容器**（由使用者自行操作）
-* Spring Boot → Go API 通信链路验证
+* Vue 3 + Vite + Naive UI 前端初始化
+* 登录页 + Dashboard 总览
+* API Key 管理界面（列表/注册/吊销，含二次确认弹窗）
+* 实例管理界面（列表/注册/详情/健康检查/指令控制台）
+* 前后端联调，全链路验证
 
-**设计层（仅出方案，实现在 P3/P4）：**
+**设计层（仅出方案，实现在 P3+）：**
 
 * 权限系统设计（见 [[panel-design]]）
 * 文件安全保护机制设计（见 [[panel-design]]）
@@ -1005,30 +1080,22 @@ refreshKey()    → POST /api/auth/refresh
 
 ## P3
 
-**业务逻辑实现 + 前端初始化：**
+**业务逻辑深化 + 文件管理：**
 
 * 用户/角色/权限 CRUD（users / roles / user_role 表）
 * 资源保护规则初始化（protected_resource 表）
 * 文件管理代理接口（Spring Boot 鉴权 → Go API 执行）
 * 操作日志（operation_logs 表）
-* Vue Panel 初始化
-* Dashboard
-* Console
+* File Manager 前端页面
+* 玩家管理（kick / whitelist / op）
+* Docker SDK 接入
 
 ---
 
 ## P4
 
-* File Manager
 * 用户管理 UI
-* 实例管理 UI
-* Docker SDK 接入
-* 玩家管理（kick / whitelist / op）
-
----
-
-## P5
-
 * 多节点管理
 * 集群管理
+* nginx 反向代理（SSL 终止 + 静态资源优化）
 * 分布式 Agent 架构

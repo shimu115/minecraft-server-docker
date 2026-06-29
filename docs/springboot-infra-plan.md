@@ -223,7 +223,208 @@ api_keys (1) ──── (0..1) server_instances
 一个实例必须绑定一个 Key（NOT NULL FK）
 ```
 
+#### users（用户表，P2 最小实现）
+
+```sql
+CREATE TABLE users (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    username        VARCHAR(64)  NOT NULL,
+    password_hash   VARCHAR(255) NOT NULL,
+    role            VARCHAR(16)  NOT NULL DEFAULT 'USER',  -- ROOT / ADMIN / USER
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_username ON users(username);
+```
+
+#### user_instances（用户-实例绑定表）
+
+```sql
+CREATE TABLE user_instances (
+    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id         BIGINT NOT NULL,
+    instance_id     BIGINT NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id)    REFERENCES users(id),
+    FOREIGN KEY (instance_id) REFERENCES server_instances(id),
+    UNIQUE (user_id, instance_id)
+);
+```
+
+#### 实例级访问控制规则
+
+```text
+ROOT  → 不查 user_instances，允许访问所有实例
+ADMIN → 查 user_instances，仅允许访问绑定的实例
+USER  → 查 user_instances，仅允许访问绑定的实例
+```
+
+**示例：**
+
+```text
+用户 a（USER）：绑定 mc1
+用户 b（ADMIN）：绑定 mc1、mc2
+用户 c（ROOT）：不绑定，默认全部
+
+场景：查看日志
+  a 请求 /api/server/{mc1_id}/logs  → 查 user_instances → 有绑定 → 允许 ✅
+  a 请求 /api/server/{mc2_id}/logs  → 查 user_instances → 无绑定 → 403 ❌
+  b 请求 /api/server/{mc2_id}/logs  → 查 user_instances → 有绑定 → 允许 ✅
+  c 请求 /api/server/{mc3_id}/logs  → ROOT → 跳过绑定检查 → 允许 ✅
+```
+
+#### 实现方式
+
+Spring Security 方法级注解 + AOP 切面：
+
+```java
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface RequireInstanceAccess {
+    // 标记需要实例级访问控制的方法
+}
+
+@Aspect
+public class InstanceAccessAspect {
+    // Before @RequireInstanceAccess methods:
+    // 1. 从 SecurityContext 获取当前用户
+    // 2. 若 role == ROOT → 放行
+    // 3. 否则查 user_instances(userId, instanceId) → 有记录放行，无记录 403
+}
+```
+
+Controller 使用：
+
+```java
+@RequireInstanceAccess
+@PostMapping("/api/server/{instanceId}/start")
+public APIResponse startServer(@PathVariable Long instanceId) { ... }
+```
+
+#### 表关系总览
+
+```text
+api_keys (1) ──── (0..1) server_instances (1) ──── (N) user_instances (N) ──── (1) users
+
+Root 用户：不在 user_instances 中，代码层面跳过检查，全局通行
+Admin/User：必须在 user_instances 中绑定实例后才能操作
+```
+
 ---
+
+## 统一响应格式
+
+所有 Spring Boot 接口使用统一响应结构：
+
+```json
+{
+    "code": 200,
+    "msg": "ok",
+    "data": { ... }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `code` | int | 业务状态码。`200` = 成功，其他 = 错误（详见错误码表） |
+| `msg` | string | 可读消息。成功时为 `"ok"`，错误时为对应错误描述 |
+| `data` | T（泛型） | 负载数据。成功时携带业务数据，错误时通常为 `null` |
+
+### 后端实现
+
+```java
+public class ApiResponse<T> {
+    private int code;
+    private String msg;
+    private T data;
+
+    private ApiResponse(int code, String msg, T data) {
+        this.code = code;
+        this.msg = msg;
+        this.data = data;
+    }
+
+    // === 成功 ===
+    public static <T> ApiResponse<T> success(T data) {
+        return new ApiResponse<>(200, "ok", data);
+    }
+    public static <T> ApiResponse<T> success() {
+        return new ApiResponse<>(200, "ok", null);
+    }
+
+    // === 错误 ===
+    public static <T> ApiResponse<T> error(ErrorCode ec) {
+        return new ApiResponse<>(ec.getCode(), ec.getMsg(), null);
+    }
+    public static <T> ApiResponse<T> error(ErrorCode ec, T data) {
+        return new ApiResponse<>(ec.getCode(), ec.getMsg(), data);
+    }
+}
+```
+
+### 错误码枚举（code 与 msg 强制绑定）
+
+```java
+public enum ErrorCode {
+
+    // ==================== 通用错误 1xxx ====================
+    SUCCESS(200, "ok"),
+    BAD_REQUEST(1000, "请求参数错误"),
+    INTERNAL_ERROR(1001, "服务器内部错误"),
+
+    // ==================== 认证错误 2xxx ====================
+    UNAUTHORIZED(2000, "未登录或登录已过期"),
+    FORBIDDEN(2001, "无权限执行此操作"),
+    INVALID_CREDENTIALS(2002, "用户名或密码错误"),
+
+    // ==================== API Key 错误 3xxx ====================
+    KEY_NOT_FOUND(3000, "API Key 不存在"),
+    KEY_ALREADY_EXISTS(3001, "该 API Key 已注册"),
+    KEY_ALREADY_BOUND(3002, "该 API Key 已被其他实例绑定"),
+    KEY_INVALID_FORMAT(3003, "API Key 格式无效，需 UUID v4 格式"),
+    KEY_REVOKED(3004, "该 API Key 已吊销"),
+    KEY_BOUND_CANNOT_DELETE(3005, "该 Key 已绑定实例，请先解绑再删除"),
+
+    // ==================== 实例错误 4xxx ====================
+    INSTANCE_NOT_FOUND(4000, "MC 实例不存在"),
+    INSTANCE_NAME_EXISTS(4001, "实例名称已存在"),
+    INSTANCE_NOT_BOUND(4002, "当前用户未绑定该实例，无法操作"),
+
+    // ==================== 用户错误 5xxx ====================
+    USER_NOT_FOUND(5000, "用户不存在"),
+    USERNAME_EXISTS(5001, "用户名已存在"),
+    USER_NOT_BOUND(5002, "用户未绑定任何实例"),
+
+    // ==================== Agent 通信错误 6xxx ====================
+    AGENT_UNREACHABLE(6000, "无法连接到 Go API"),
+    AGENT_TIMEOUT(6001, "Go API 请求超时"),
+    AGENT_ERROR(6002, "Go API 返回错误"),
+    AGENT_REFRESH_FAILED(6003, "刷新 Go API Key 失败"),
+    ;
+
+    private final int code;
+    private final String msg;
+
+    ErrorCode(int code, String msg) {
+        this.code = code;
+        this.msg = msg;
+    }
+
+    public int getCode() { return code; }
+    public String getMsg() { return msg; }
+}
+```
+
+### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| **code 与 msg 强绑定** | 每个错误码在 enum 中唯一定义，杜绝同一 code 对应不同 msg |
+| **分段管理** | `1xxx` 通用、`2xxx` 认证、`3xxx` Key、`4xxx` 实例、`5xxx` 用户、`6xxx` Agent——看 code 前缀就知道哪个模块出问题 |
+| **扩展方式** | 新增错误场景只需在对应分段加一个枚举值，不影响已有 code |
+| **国际化预留** | `msg` 目前硬编码中文，后续可改为 `msgKey` + i18n 资源文件 |
+| **与 Go API 格式的关系** | Go API 使用 `code + status + message + data`，Spring Boot 使用 `code + msg + data`——两者格式不同但互不干扰，Spring Boot 是前端唯一入口，前端只看到 Spring Boot 的格式 |
 
 ## 数据库静态加密
 
@@ -317,8 +518,8 @@ Key 管理独立于实例管理——用户先拿到 Go API 生成的 Key，在�
 
 ```json
 {
-    "code": 201,
-    "status": "ok",
+    "code": 200,
+    "msg": "ok",
     "data": {
         "id": 1,
         "name": "1.12.2 Forge 生存服",
@@ -347,7 +548,7 @@ Key 管理独立于实例管理——用户先拿到 Go API 生成的 Key，在�
 ```json
 {
     "code": 200,
-    "status": "ok",
+    "msg": "ok",
     "data": [
         {
             "id": 1,
@@ -417,12 +618,12 @@ Key 管理独立于实例管理——用户先拿到 Go API 生成的 Key，在�
 }
 ```
 
-**响应（201）：**
+**响应（200）：**
 
 ```json
 {
-    "code": 201,
-    "status": "ok",
+    "code": 200,
+    "msg": "ok",
     "data": {
         "id": 1,
         "name": "1.12.2 Forge Survival",
@@ -522,8 +723,7 @@ Spring Boot 无需额外扩展 Go API，直接调用即可。
 ```json
 {
     "code": 200,
-    "status": "ok",
-    "message": "API Key 已刷新，旧 Key 已吊销",
+    "msg": "API Key 已刷新，旧 Key 已吊销",
     "data": {
         "instance_id": 1,
         "previous_key": {
@@ -542,12 +742,12 @@ Spring Boot 无需额外扩展 Go API，直接调用即可。
 
 **失败场景：**
 
-| 场景 | HTTP Code |
-|------|-----------|
-| 非 Root 用户 | 403 |
-| 实例不存在 | 404 |
-| Go API 不可达（AgentClient 调用超时） | 502 |
-| Go API 返回错误（如旧 Key 已失效） | 502，message 中包含 Go API 错误信息 |
+| 场景 | 错误码 | 响应 |
+|------|--------|------|
+| 非 Root 用户 | `FORBIDDEN` (2001) | `{"code":2001,"msg":"无权限执行此操作","data":null}` |
+| 实例不存在 | `INSTANCE_NOT_FOUND` (4000) | `{"code":4000,"msg":"MC 实例不存在","data":null}` |
+| Go API 不可达 | `AGENT_UNREACHABLE` (6000) | `{"code":6000,"msg":"无法连接到 Go API","data":null}` |
+| 旧 Key 已在 Go API 侧失效 | `AGENT_REFRESH_FAILED` (6003) | `{"code":6003,"msg":"刷新 Go API Key 失败","data":null}` |
 
 **与 `bind-key` 的区别：**
 
@@ -573,7 +773,7 @@ Spring Boot 无需额外扩展 Go API，直接调用即可。
 ```json
 {
     "code": 200,
-    "status": "ok",
+    "msg": "ok",
     "data": {
         "instance_id": 1,
         "instance_name": "1.12.2 Forge Survival",
@@ -586,9 +786,9 @@ Spring Boot 无需额外扩展 Go API，直接调用即可。
 
 ```json
 {
-    "code": 502,
-    "status": "error",
-    "message": "无法连接到 Go API: connection refused"
+    "code": 6000,
+    "msg": "无法连接到 Go API",
+    "data": null
 }
 ```
 
@@ -670,18 +870,23 @@ Go API 现有的 Key 管理机制完全满足需求：
 
 ### Spring Boot 侧
 
-- [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security
+- [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security + Spring AOP
 - [ ] `PanelApplication.java`：启动类
-- [ ] `SecurityConfig.java`：基础安全配置（Admin API 需要认证 + Root 角色区分）
+- [ ] `SecurityConfig.java`：Spring Security + JWT 认证 + 角色体系（ROOT/ADMIN/USER）
+- [ ] `JwtUtil.java`：JWT 签发/校验工具
 - [ ] `KeyValueEncryptor.java`：AES-256-GCM `AttributeConverter`（DB 静态加密）
-- [ ] `ApiKey.java` / `ServerInstance.java`：实体
-- [ ] `ApiKeyRepository.java` / `ServerInstanceRepository.java`：数据访问
+- [ ] `User.java` / `ApiKey.java` / `ServerInstance.java` / `UserInstance.java`：实体
+- [ ] `UserRepository.java` / `ApiKeyRepository.java` / `ServerInstanceRepository.java` / `UserInstanceRepository.java`：数据访问
+- [ ] `UserService.java`：用户 CRUD + 实例绑定/解绑
 - [ ] `ApiKeyService.java`：Key 注册/命名/查询/删除/吊销
 - [ ] `InstanceService.java`：实例 CRUD + Key 绑定/换绑 + 刷新
+- [ ] `AuthController.java`：登录接口（`POST /api/auth/login`）
 - [ ] `ApiKeyController.java`：Key 管理 REST API
 - [ ] `InstanceController.java`：实例管理 REST API + refresh-key 端点
-- [ ] `AgentClient.java`：Go API HTTP 客户端（含 `refreshKey()` 方法，调用 `POST /api/auth/refresh`）
-- [ ] `application.yml`：配置（含 `app.db-encrypt-key`）
+- [ ] `ServerController.java`：服务端控制代理接口（start/stop/restart/status/command/logs）
+- [ ] `RequireInstanceAccess.java` + `InstanceAccessAspect.java`：实例级访问控制注解 + 切面
+- [ ] `AgentClient.java`：Go API HTTP 客户端（含 `refreshKey()` 方法）
+- [ ] `application.yml`：配置（含 `app.db-encrypt-key` + `app.jwt-secret`）
 
 ### Go API 侧
 
@@ -689,26 +894,27 @@ Go API 现有的 Key 管理机制完全满足需求：
 
 ### 验证标准
 
-1. Spring Boot 启动成功，数据库自动建表（`api_keys` + `server_instances`）
-2. `POST /api/admin/keys` 注册 Key 成功，DB 中 `key_value` 为密文存储
-3. `POST /api/admin/instances` 创建实例并绑定 Key 成功
-4. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
-5. `PUT /api/admin/instances/{id}/refresh-key` 调 Go API `POST /api/auth/refresh` → 新 Key 注册 → 旧 Key 吊销 → 实例绑定新 Key
-6. Key 换绑后，新 Key 立即生效
+1. Spring Boot 启动成功，数据库自动建表（`users` + `api_keys` + `server_instances` + `user_instances`）
+2. `POST /api/auth/login` 登录成功，返回 JWT
+3. `POST /api/admin/keys` 注册 Key 成功，DB 中 `key_value` 为密文存储
+4. `POST /api/admin/instances` 创建实例并绑定 Key 成功
+5. `GET /api/admin/instances/{id}/health` 通过 AgentClient 调通 Go API 的 `/api/health`
+6. `PUT /api/admin/instances/{id}/refresh-key` 调 Go API `POST /api/auth/refresh` → 新 Key 注册 → 旧 Key 吊销
+7. 绑定实例到用户 → 用户可访问该实例的接口；未绑定 → 返回 403
+8. Root 用户不受绑定限制，可访问所有实例
+9. Key 换绑后，新 Key 立即生效
 
 ---
 
-## 有意延后到 P3/P4 的内容
+## 有意延后到 P3+ 的内容
 
 | 内容 | 延后原因 |
 |------|----------|
-| `users` / `roles` / `user_role` 表 | 属于业务权限模型，非基础设施 |
+| `roles` / `user_role` RBAC 表 | P2 使用 user.role 字段区分角色，够用；细粒度 RBAC 延后 |
 | `protected_resource` 表 | 需要在 Agent 链路通后，结合实际文件系统设计初始化策略 |
 | `operation_logs` 表 | 依赖具体业务操作定义 |
 | 文件管理代理接口 | 需要权限模型先定型 |
-| 玩家管理接口 | 纯业务功能 |
-| Vue Panel | P3 开始 |
-| Dashboard / Console | P3 开始 |
+| 玩家管理接口（kick/whitelist/op） | 纯业务功能 |
 | Docker SDK 接入 | Spring Boot 不管理容器生命周期 |
 
 ---
