@@ -832,12 +832,15 @@ Spring Boot **不管理 Docker 容器**——容器的创建/启动/停止由使
 ```text
 panel/
 ├── backend/                    # Spring Boot（[[springboot-infra-plan]]）
-│   ├── config                  # 安全配置（Spring Security + JWT）
-│   ├── entity                  # ApiKey + ServerInstance 实体
+│   ├── common                  # ApiResponse + ErrorCode
+│   ├── config                  # SecurityConfig + TryCatchGlobalException
+│   ├── exception               # McPanelException 自定义业务异常
+│   ├── entity                  # User + ApiKey + ServerInstance + UserInstance
 │   ├── repository              # 数据访问
-│   ├── service                 # Key 注册管理 + 实例管理
-│   ├── controller              # Key 管理 + 实例管理 REST API
-│   └── agent                   # Go API HTTP 客户端（AgentClient）
+│   ├── service                 # Key / 实例 / 用户管理
+│   ├── controller              # REST API（Auth + Key + Instance + Server）
+│   ├── agent                   # AgentClient（Go API HTTP 客户端）
+│   └── annotation              # @RequireInstanceAccess + AOP 切面
 │
 └── web/                        # Vue 3 前端（[[frontend-plan]]）
     ├── views/                  # 页面（Login / Dashboard / Keys / Instances）
@@ -1056,6 +1059,8 @@ refreshKey()    → POST /api/auth/refresh
 **全栈基础设施（Spring Boot + Vue 前端，详细方案见 [[springboot-infra-plan]] 和 [[frontend-plan]]）：**
 
 * Spring Boot 项目骨架搭建 + 安全配置（Spring Security + JWT + ROOT/ADMIN/USER 角色）
+* 统一响应格式（`ApiResponse<T>` + `ErrorCode` 枚举，code 与 msg 强绑定）
+* 全局异常处理（`McPanelException` 自定义异常 + `TryCatchGlobalException` 全局捕捉器）
 * 用户管理（`users` 表）+ 实例级访问控制（`user_instances` 多对多绑定 + `@RequireInstanceAccess` AOP）
 * 数据库静态加密（AES-256-GCM `AttributeConverter`）
 * API Key 注册管理（`api_keys` 表——用户命名 + 粘贴从 Go API 获取的 Key）

@@ -121,20 +121,33 @@ panel/backend/
 ├── src/main/java/com/mcpanel/panel/
 │   ├── PanelApplication.java
 │   │
+│   ├── common/
+│   │   ├── ApiResponse.java              # 统一响应包装类
+│   │   └── ErrorCode.java                # 错误码枚举
+│   │
 │   ├── config/
-│   │   └── SecurityConfig.java          # 基础安全配置
+│   │   ├── SecurityConfig.java           # Spring Security + JWT 配置
+│   │   └── TryCatchGlobalException.java  # 全局异常捕捉器
+│   │
+│   ├── exception/
+│   │   └── McPanelException.java         # 自定义业务异常
 │   │
 │   ├── entity/
-│   │   ├── ApiKey.java                  # API Key 实体
-│   │   └── ServerInstance.java          # MC 实例实体
+   │   │   ├── User.java                     # 用户实体
+│   │   ├── ApiKey.java                   # API Key 实体
+│   │   ├── ServerInstance.java           # MC 实例实体
+│   │   └── UserInstance.java             # 用户-实例绑定实体
 │   │
 │   ├── repository/
+│   │   ├── UserRepository.java
 │   │   ├── ApiKeyRepository.java
-│   │   └── ServerInstanceRepository.java
+│   │   ├── ServerInstanceRepository.java
+│   │   └── UserInstanceRepository.java
 │   │
 │   ├── service/
-│   │   ├── ApiKeyService.java           # Key 注册/命名/删除
-│   │   └── InstanceService.java         # 实例 CRUD + Key 绑定
+│   │   ├── UserService.java              # 用户管理
+│   │   ├── ApiKeyService.java            # Key 注册/命名/删除/吊销
+│   │   └── InstanceService.java          # 实例 CRUD + Key 绑定/刷新
 │   │
 │   ├── controller/
 │   │   ├── ApiKeyController.java        # Key 管理 REST API
@@ -425,6 +438,165 @@ public enum ErrorCode {
 | **扩展方式** | 新增错误场景只需在对应分段加一个枚举值，不影响已有 code |
 | **国际化预留** | `msg` 目前硬编码中文，后续可改为 `msgKey` + i18n 资源文件 |
 | **与 Go API 格式的关系** | Go API 使用 `code + status + message + data`，Spring Boot 使用 `code + msg + data`——两者格式不同但互不干扰，Spring Boot 是前端唯一入口，前端只看到 Spring Boot 的格式 |
+
+---
+
+## 全局异常处理
+
+业务代码中任何位置抛出的异常，都应被统一拦截并转换为标准的 `{code, msg, data}` 响应。实现方式：**自定义异常 + 全局异常捕捉器**。
+
+### 自定义异常：McPanelException
+
+```java
+package com.mcpanel.panel.exception;
+
+import com.mcpanel.panel.common.ErrorCode;
+
+/**
+ * 业务异常，携带 ErrorCode。
+ * 在 Service / Controller 中遇到业务错误时直接抛出，
+ * 由全局异常捕捉器统一处理为 ApiResponse。
+ */
+public class McPanelException extends RuntimeException {
+
+    private final ErrorCode errorCode;
+
+    public McPanelException(ErrorCode errorCode) {
+        super(errorCode.getMsg());
+        this.errorCode = errorCode;
+    }
+
+    public McPanelException(ErrorCode errorCode, String detail) {
+        super(detail);
+        this.errorCode = errorCode;
+    }
+
+    public ErrorCode getErrorCode() {
+        return errorCode;
+    }
+}
+```
+
+**使用示例：**
+
+```java
+// Service 层：Key 重复注册
+if (apiKeyRepository.existsByKeyValue(encryptedValue)) {
+    throw new McPanelException(ErrorCode.KEY_ALREADY_EXISTS);
+}
+
+// Service 层：实例不存在
+ServerInstance instance = instanceRepository.findById(id)
+    .orElseThrow(() -> new McPanelException(ErrorCode.INSTANCE_NOT_FOUND));
+
+// Controller 层：非 Root 用户尝试 refresh-key
+if (!currentUser.isRoot()) {
+    throw new McPanelException(ErrorCode.FORBIDDEN);
+}
+```
+
+### 全局异常捕捉器：TryCatchGlobalException
+
+```java
+package com.mcpanel.panel.config;
+
+import com.mcpanel.panel.common.ApiResponse;
+import com.mcpanel.panel.common.ErrorCode;
+import com.mcpanel.panel.exception.McPanelException;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+
+/**
+ * 全局异常捕捉器。
+ * 拦截所有未处理的异常，统一包装为 ApiResponse 格式返回。
+ */
+@RestControllerAdvice
+public class TryCatchGlobalException {
+
+    private static final Logger log = LoggerFactory.getLogger(TryCatchGlobalException.class);
+
+    /**
+     * 自定义业务异常 —— 使用 ErrorCode 中绑定的 code + msg
+     */
+    @ExceptionHandler(McPanelException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMcPanelException(
+            McPanelException ex, HttpServletRequest request) {
+
+        log.warn("[mc-panel] 业务异常 | {} {} | code={} msg={}",
+                request.getMethod(), request.getRequestURI(),
+                ex.getErrorCode().getCode(), ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.OK)  // HTTP 层始终 200，业务状态由 body.code 区分
+                .body(ApiResponse.error(ex.getErrorCode()));
+    }
+
+    /**
+     * 参数校验异常（@Valid 失败）
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleValidation(
+            MethodArgumentNotValidException ex, HttpServletRequest request) {
+
+        String detail = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .reduce((a, b) -> a + "; " + b)
+                .orElse("参数校验失败");
+
+        log.warn("[mc-panel] 参数校验失败 | {} {} | {}",
+                request.getMethod(), request.getRequestURI(), detail);
+
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(new ApiResponse<>(ErrorCode.BAD_REQUEST.getCode(), detail, null));
+    }
+
+    /**
+     * 兜底 —— 未预期的运行时异常
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Void>> handleException(
+            Exception ex, HttpServletRequest request) {
+
+        log.error("[mc-panel] 未捕获异常 | {} {} | {}",
+                request.getMethod(), request.getRequestURI(), ex.getMessage(), ex);
+
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR));
+    }
+}
+```
+
+### 设计要点
+
+| 要点 | 说明 |
+|------|------|
+| **HTTP 状态码统一 200** | 业务成功/失败由 `body.code` 区分，HTTP 层始终返回 200。避免前端需要同时判断 HTTP 状态码和业务码 |
+| **自定义异常 = ErrorCode 的载体** | `McPanelException` 只是一个壳，核心是 `ErrorCode`。抛出异常 → 全局捕捉器取出 ErrorCode → 转换为 `ApiResponse` |
+| **日志分级** | 业务异常 `warn`（预期内），未知异常 `error`（需关注），参数校验 `warn` |
+| **请求信息记录** | 每条异常日志带 `METHOD + URI`，方便定位 |
+| **兜底处理** | `Exception.class` 捕获所有未处理异常，保证前端永远不会收到 HTML 错误页或空响应 |
+| **参数校验** | `MethodArgumentNotValidException` 单独处理，提取字段级错误信息返回给前端 |
+
+### 调用链路
+
+```text
+Controller / Service 抛出 McPanelException(ErrorCode.KEY_ALREADY_EXISTS)
+       ↓
+TryCatchGlobalException.handleMcPanelException() 拦截
+       ↓
+提取 ErrorCode(code=3001, msg="该 API Key 已注册")
+       ↓
+返回 ResponseEntity<ApiResponse> → JSON:
+       {"code":3001, "msg":"该 API Key 已注册", "data":null}
+```
 
 ## 数据库静态加密
 
@@ -870,10 +1042,14 @@ Go API 现有的 Key 管理机制完全满足需求：
 
 ### Spring Boot 侧
 
-- [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security + Spring AOP
+- [ ] `pom.xml`：Spring Boot 3.x + Spring Web + Spring Data JPA + H2/MySQL + Spring Security + Spring AOP + Validation
 - [ ] `PanelApplication.java`：启动类
 - [ ] `SecurityConfig.java`：Spring Security + JWT 认证 + 角色体系（ROOT/ADMIN/USER）
 - [ ] `JwtUtil.java`：JWT 签发/校验工具
+- [ ] `ApiResponse.java`：统一响应包装类
+- [ ] `ErrorCode.java`：错误码枚举（6 分段，23 个错误码）
+- [ ] `McPanelException.java`：自定义业务异常（携带 ErrorCode）
+- [ ] `TryCatchGlobalException.java`：全局异常捕捉器（`@RestControllerAdvice`）
 - [ ] `KeyValueEncryptor.java`：AES-256-GCM `AttributeConverter`（DB 静态加密）
 - [ ] `User.java` / `ApiKey.java` / `ServerInstance.java` / `UserInstance.java`：实体
 - [ ] `UserRepository.java` / `ApiKeyRepository.java` / `ServerInstanceRepository.java` / `UserInstanceRepository.java`：数据访问

@@ -75,7 +75,8 @@ panel/web/
 │   │   └── index.ts               # 路由配置
 │   │
 │   ├── api/
-│   │   ├── client.ts              # axios 实例（baseURL、拦截器）
+│   │   ├── types.ts               # ApiResponse 类型 + ErrorCode 枚举
+│   │   ├── client.ts              # axios 实例 + 请求/响应拦截器
 │   │   ├── auth.ts                # 登录相关 API
 │   │   ├── keys.ts                # API Key 管理 API
 │   │   └── instances.ts           # 实例管理 API
@@ -157,7 +158,8 @@ const routes = [
 
 - 名称输入框
 - Key 值输入框（粘贴 Go API 生成的值）
-- 格式校验（UUID v4）、唯一性校验（后端返回错误提示）
+- 格式校验（UUID v4，失败 → 后端返回 `KEY_INVALID_FORMAT` 3003，拦截器自动提示）
+- 唯一性校验（重复 → 后端返回 `KEY_ALREADY_EXISTS` 3001，拦截器自动提示）
 
 **吊销（二次确认弹窗）：**
 
@@ -195,8 +197,60 @@ const routes = [
 
 ## axios 客户端设计
 
+### 响应格式
+
+Spring Boot 统一响应格式为 `{ code: int, msg: string, data: T }`，HTTP 层始终返回 200，业务成功/失败由 `code` 区分。
+
+前端需要在 axios 响应拦截器中做**响应解包**——`code === 200` 时自动提取 `data`，否则按错误处理。
+
+### TypeScript 类型定义
+
+```typescript
+// api/types.ts
+
+/** 后端统一响应结构 */
+interface ApiResponse<T = unknown> {
+    code: number;
+    msg: string;
+    data: T;
+}
+
+/** 后端错误码 —— 前端只关注需要特殊处理的 code，其余走通用逻辑 */
+enum ErrorCode {
+    SUCCESS = 200,
+    // 认证
+    UNAUTHORIZED = 2000,
+    FORBIDDEN = 2001,
+    INVALID_CREDENTIALS = 2002,
+    // Key
+    KEY_NOT_FOUND = 3000,
+    KEY_ALREADY_EXISTS = 3001,
+    KEY_ALREADY_BOUND = 3002,
+    KEY_INVALID_FORMAT = 3003,
+    KEY_REVOKED = 3004,
+    KEY_BOUND_CANNOT_DELETE = 3005,
+    // 实例
+    INSTANCE_NOT_FOUND = 4000,
+    INSTANCE_NAME_EXISTS = 4001,
+    INSTANCE_NOT_BOUND = 4002,
+    // 用户
+    USER_NOT_FOUND = 5000,
+    USERNAME_EXISTS = 5001,
+    // Agent
+    AGENT_UNREACHABLE = 6000,
+    AGENT_TIMEOUT = 6001,
+    AGENT_ERROR = 6002,
+}
+```
+
+### axios 实例 + 拦截器
+
 ```typescript
 // api/client.ts
+import axios from 'axios';
+import { useMessage } from 'naive-ui';
+import router from '@/router';
+
 const apiClient = axios.create({
     baseURL: '/api',
     timeout: 30000,
@@ -211,20 +265,84 @@ apiClient.interceptors.request.use(config => {
     return config;
 });
 
-// 响应拦截器：统一错误处理
+// 响应拦截器：统一解包 + 错误处理
 apiClient.interceptors.response.use(
-    response => response,
-    error => {
-        if (error.response?.status === 401) {
-            localStorage.removeItem('token');
-            router.push('/login');
+    response => {
+        const body = response.data as ApiResponse;
+
+        // 成功 → 提取 data 返回给调用方
+        if (body.code === 200) {
+            return body.data;
         }
+
+        // 业务错误 → 统一提示
+        handleBusinessError(body);
+        return Promise.reject(body);
+    },
+    error => {
+        // 网络级错误（超时、断网、5xx 等兜底）
+        const message = useMessage();
+        message.error('网络异常，请检查连接后重试');
         return Promise.reject(error);
     }
 );
+
+function handleBusinessError(body: ApiResponse) {
+    const message = useMessage();
+
+    switch (body.code) {
+        case ErrorCode.UNAUTHORIZED:
+            // 未登录 → 跳转登录页
+            localStorage.removeItem('token');
+            router.push('/login');
+            message.warning('登录已过期，请重新登录');
+            break;
+
+        case ErrorCode.FORBIDDEN:
+            message.error('无权限执行此操作');
+            break;
+
+        case ErrorCode.INSTANCE_NOT_BOUND:
+            message.error('您未绑定该实例，无法操作');
+            break;
+
+        default:
+            // 其他业务错误 → 直接显示后端返回的 msg
+            message.error(body.msg || '操作失败');
+            break;
+    }
+}
+
+export default apiClient;
 ```
 
-**关键：** 前端不处理 Go API Key。所有 /api/* 请求发往同源的 Spring Boot，由 AgentClient 在服务端携带 Go API Key 转发。
+### API 调用示例
+
+调用方只需处理成功数据，错误已被拦截器统一处理：
+
+```typescript
+// api/keys.ts
+import apiClient from './client';
+
+export function registerKey(name: string, keyValue: string) {
+    // 响应拦截器已解包：code=200 时直接返回 data，否则自动提示错误
+    return apiClient.post('/admin/keys', { name, key_value: keyValue });
+}
+
+// views/keys/KeyCreateView.vue
+async function handleSubmit() {
+    try {
+        const result = await registerKey(form.name, form.keyValue);
+        // result 就是 ApiResponse.data，无需判断 code
+        message.success(`Key「${result.name}」注册成功`);
+        closeDialog();
+        refreshList();
+    } catch (e) {
+        // 错误已由拦截器提示，这里只需处理 UI 状态恢复
+        submitLoading = false;
+    }
+}
+```
 
 ---
 
@@ -233,7 +351,8 @@ apiClient.interceptors.response.use(
 - [ ] Vue 3 + Vite + TypeScript 项目初始化
 - [ ] Naive UI 集成 + 全局主题配置
 - [ ] 路由配置 + 导航守卫（JWT 认证）
-- [ ] axios 客户端 + 拦截器
+- [ ] `api/types.ts`：ApiResponse 类型 + ErrorCode 枚举（与后端一致）
+- [ ] `api/client.ts`：axios 实例 + 请求拦截器（JWT）+ 响应拦截器（code 解包 + 错误分发）
 - [ ] LoginView（登录页）
 - [ ] AppLayout（侧边栏导航：Dashboard / API Keys / Instances）
 - [ ] DashboardView（总览卡片）
@@ -253,7 +372,10 @@ apiClient.interceptors.response.use(
 | 路由 fallback | Spring Boot 将所有非 `/api/*` 的 GET 请求 fallback 到 `index.html`（Vue SPA） |
 | API 前缀 | 所有后端接口统一 `/api/*`，避免与前端路由冲突 |
 | JWT | Spring Boot 签发，前端存储在 localStorage，请求时 Bearer 携带 |
-| 错误格式 | 统一 `{ "code": number, "status": "ok"|"error", "message": string, "data": any }` |
+| 响应格式 | `{ code: int, msg: string, data: T }`，HTTP 层始终 200 |
+| 错误处理 | 前端 axios 拦截器自动解包：`code=200` → 返回 `data`，否则按 `code` 分发处理或显示 `msg` |
+| ErrorCode | 前端维护 `ErrorCode` 枚举（与后端一致），仅特殊处理的 code（如 2000 跳登录）写 switch，其余走通用 `msg` 提示 |
+| Go API Key | 前端不接触。所有 `/api/*` 请求由 Spring Boot AgentClient 在服务端携带 Key 转发 Go API |
 
 ---
 
