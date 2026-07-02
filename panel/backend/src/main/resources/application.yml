@@ -1,0 +1,45 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: mc-panel
+
+  datasource:
+    url: jdbc:h2:file:./data/panel;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+  web:
+    resources:
+      static-locations: classpath:/static/
+
+app:
+  jwt-secret: "${JWT_SECRET:mc-panel-default-jwt-secret-key-change-in-production}"
+  jwt-expiration: "${JWT_EXPIRATION:86400}"
+  db-encrypt-key: "${DB_ENCRYPT_KEY:v5ha7q57HDFehBwtAp2jOGOae8ssPWl64sKoEcpmDGk=}"
+  root-user:
+    username: "${ROOT_USERNAME:root}"
+    password: "${ROOT_PASSWORD:root123}"
+
+logging:
+  level:
+    com.mcpanel.panel: debug
+    org.springframework.security: info

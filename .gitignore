@@ -1,5 +1,4 @@
 # JDK binaries (downloaded at build time)
-java/
 
 # Data directory (security.txt, H2 database, etc.)
 data/
@@ -7,6 +6,9 @@ data/
 *.2
 minecraft/
 test/
+static/
+target/
+node_modules/
 
 # IDE
 .idea/

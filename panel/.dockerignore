@@ -1,0 +1,7 @@
+web/node_modules
+backend/target
+backend/data
+**/.git
+**/node_modules
+**/.idea
+**/*.iml

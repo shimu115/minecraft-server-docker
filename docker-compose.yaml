@@ -4,7 +4,7 @@ services:
     container_name: minecraft-server-1.12.2-forge-2
     ports:
       - "${MC_PORT:-25565}:25565"
-      # 这是 golang 监听的端口，不建议挂载
+      # Go API 端口仅内网暴露（panel 通过 mc-network 访问），不映射到宿主机
       # - "${API_PORT:-25560}:25560"
     restart: always
     environment:
@@ -25,6 +25,36 @@ services:
       mc-network:
         aliases:
           - mc-server-1
+
+  panel:
+#    build:
+#      context: ./panel
+#      dockerfile: Dockerfile
+#      args:
+#        CACHE_BUST: "${CACHE_BUST:-unknown}"
+    container_name: mc-panel
+    ports:
+      - "${PANEL_PORT:-8080}:8080"
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+      LANG: C.UTF-8
+      # JWT 密钥（生产环境请更换为随机字符串）
+      JWT_SECRET: "${JWT_SECRET:-cGFuZWwtand0LXNlY3JldC1rZXktMjAyNi1wcm9k}"
+      # 数据库加密密钥（Base64 编码的 32 字节密钥，生产环境务必更换）
+      # 生成方式: openssl rand -base64 32
+      DB_ENCRYPT_KEY: "${DB_ENCRYPT_KEY:-v5ha7q57HDFehBwtAp2jOGOae8ssPWl64sKoEcpmDGk=}"
+      # Root 用户初始密码（首次启动创建，后续修改无效）
+      ROOT_PASSWORD: "${ROOT_PASSWORD:-root123}"
+      # Spring 数据源（H2 文件模式，数据持久化到 volume）
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/app/data/panel;DB_CLOSE_DELAY=-1;MODE=MySQL"
+    volumes:
+      - ${DATA_PATH}/panel-data:/app/data
+    networks:
+      mc-network:
+        aliases:
+          - mc-panel
+
 networks:
   mc-network:
     name: mc-network
