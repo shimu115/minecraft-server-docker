@@ -28,7 +28,7 @@ public class ServerController {
     @RequireInstanceAccess
     @PostMapping("/{id}/start-server")
     public ApiResponse<Void> startServer(@PathVariable Long id) {
-        var ctx = getContext(id);
+        InstanceContext ctx = getContext(id);
         agentClient.startServer(ctx.baseUrl, ctx.keyValue);
         return ApiResponse.success();
     }
@@ -36,7 +36,7 @@ public class ServerController {
     @RequireInstanceAccess
     @PostMapping("/{id}/stop-server")
     public ApiResponse<Void> stopServer(@PathVariable Long id) {
-        var ctx = getContext(id);
+        InstanceContext ctx = getContext(id);
         agentClient.stopServer(ctx.baseUrl, ctx.keyValue);
         return ApiResponse.success();
     }
@@ -44,7 +44,7 @@ public class ServerController {
     @RequireInstanceAccess
     @PostMapping("/{id}/restart-server")
     public ApiResponse<Void> restartServer(@PathVariable Long id) {
-        var ctx = getContext(id);
+        InstanceContext ctx = getContext(id);
         agentClient.restartServer(ctx.baseUrl, ctx.keyValue);
         return ApiResponse.success();
     }
@@ -52,7 +52,7 @@ public class ServerController {
     @RequireInstanceAccess
     @GetMapping("/{id}/get-status")
     public ApiResponse<String> getStatus(@PathVariable Long id) {
-        var ctx = getContext(id);
+        InstanceContext ctx = getContext(id);
         String result = agentClient.getStatus(ctx.baseUrl, ctx.keyValue);
         return ApiResponse.success(result);
     }
@@ -60,7 +60,7 @@ public class ServerController {
     @RequireInstanceAccess
     @PostMapping("/{id}/send-command")
     public ApiResponse<Void> sendCommand(@PathVariable Long id, @Valid @RequestBody CommandRequest request) {
-        var ctx = getContext(id);
+        InstanceContext ctx = getContext(id);
         agentClient.sendCommand(ctx.baseUrl, ctx.keyValue, request.getCommand());
         return ApiResponse.success();
     }

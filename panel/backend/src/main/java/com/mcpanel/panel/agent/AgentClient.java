@@ -36,7 +36,7 @@ public class AgentClient {
     }
 
     private static org.springframework.http.client.JdkClientHttpRequestFactory clientHttpRequestFactory() {
-        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory();
+        org.springframework.http.client.JdkClientHttpRequestFactory factory = new org.springframework.http.client.JdkClientHttpRequestFactory();
         factory.setReadTimeout(Duration.ofSeconds(30));
         return factory;
     }
@@ -137,7 +137,7 @@ public class AgentClient {
 
     private void post(String baseUrl, String path, String keyValue, String requestBody) {
         try {
-            var request = restClient.post()
+            RestClient.RequestBodySpec request = restClient.post()
                     .uri(baseUrl + path)
                     .header("Authorization", "Bearer " + keyValue);
 
