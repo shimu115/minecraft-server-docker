@@ -18,7 +18,7 @@ RUN apt update \
  && rm -rf /var/lib/apt/lists/*
 
 # 拷贝脚本
-COPY ./scripts/ /scripts/
+COPY ./scripts /scripts/
 
 # 设置脚本可执行
 RUN chmod +x /scripts/start.sh /scripts/run.sh /scripts/jdk.sh
