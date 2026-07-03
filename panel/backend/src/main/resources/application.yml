@@ -8,8 +8,8 @@ spring:
   datasource:
     url: jdbc:h2:file:./data/panel;DB_CLOSE_DELAY=-1;MODE=MySQL
     driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    username: mc-panel
+    password: mc-panel
 
   h2:
     console:
