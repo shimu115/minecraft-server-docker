@@ -1,12 +1,15 @@
 package com.mcpanel.panel.entity;
 
 import jakarta.persistence.*;
+import lombok.Data;
+
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "server_instances", indexes = {
         @Index(name = "idx_instance_name", columnList = "name", unique = true)
 })
+@Data
 public class ServerInstance {
 
     @Id
@@ -45,42 +48,6 @@ public class ServerInstance {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt = LocalDateTime.now();
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-
-    public Long getApiKeyId() { return apiKeyId; }
-    public void setApiKeyId(Long apiKeyId) { this.apiKeyId = apiKeyId; }
-
-    public String getHost() { return host; }
-    public void setHost(String host) { this.host = host; }
-
-    public Integer getPort() { return port; }
-    public void setPort(Integer port) { this.port = port; }
-
-    public String getServerType() { return serverType; }
-    public void setServerType(String serverType) { this.serverType = serverType; }
-
-    public String getMcVersion() { return mcVersion; }
-    public void setMcVersion(String mcVersion) { this.mcVersion = mcVersion; }
-
-    public String getRconHost() { return rconHost; }
-    public void setRconHost(String rconHost) { this.rconHost = rconHost; }
-
-    public Integer getRconPort() { return rconPort; }
-    public void setRconPort(Integer rconPort) { this.rconPort = rconPort; }
-
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 
     @PreUpdate
     public void preUpdate() {

@@ -1,12 +1,14 @@
 package com.mcpanel.panel.exception;
 
 import com.mcpanel.panel.common.ErrorCode;
+import lombok.Getter;
 
 /**
  * 自定义业务异常，携带 ErrorCode。
  * 在 Service/Controller 中遇到业务错误时直接抛出，
  * 由 TryCatchGlobalException 统一处理为 ApiResponse。
  */
+@Getter
 public class McPanelException extends RuntimeException {
 
     private final ErrorCode errorCode;
@@ -21,7 +23,4 @@ public class McPanelException extends RuntimeException {
         this.errorCode = errorCode;
     }
 
-    public ErrorCode getErrorCode() {
-        return errorCode;
-    }
 }

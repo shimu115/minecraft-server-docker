@@ -1,12 +1,15 @@
 package com.mcpanel.panel.entity;
 
 import jakarta.persistence.*;
+import lombok.Data;
+
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "user_instances", uniqueConstraints = {
         @UniqueConstraint(columnNames = {"user_id", "instance_id"})
 })
+@Data
 public class UserInstance {
 
     @Id
@@ -21,16 +24,4 @@ public class UserInstance {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
-
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public Long getUserId() { return userId; }
-    public void setUserId(Long userId) { this.userId = userId; }
-
-    public Long getInstanceId() { return instanceId; }
-    public void setInstanceId(Long instanceId) { this.instanceId = instanceId; }
-
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }
