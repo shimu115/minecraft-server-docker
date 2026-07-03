@@ -71,7 +71,32 @@ public class InstanceServiceImpl implements InstanceService {
     public InstanceResponse getInstance(Long id) {
         ServerInstance inst = instanceRepository.findById(id)
                 .orElseThrow(() -> new McPanelException(ErrorCode.INSTANCE_NOT_FOUND));
+        syncStatus(inst);
         return toInstanceResponse(inst);
+    }
+
+    /**
+     * 通过 Go API 探活，同步实例运行状态到数据库。
+     */
+    private void syncStatus(ServerInstance inst) {
+        try {
+            if (!apiKeyRepository.existsById(inst.getApiKeyId())) return;
+
+            String goApiBaseUrl ="http://" + inst.getHost() + ":" + inst.getPort();
+            String healthJson = agentClient.health(goApiBaseUrl);
+
+            // 解析 Go API health 响应: {"status":"ok","data":{"mc_server_running":true}}
+            boolean running = healthJson.contains("\"mc_server_running\":true");
+            String newStatus = running ? "running" : "stopped";
+
+            if (!newStatus.equals(inst.getStatus())) {
+                inst.setStatus(newStatus);
+                instanceRepository.save(inst);
+            }
+        } catch (Exception e) {
+            // Go API 不可达时保持原状态，不抛异常
+            log.debug("[mc-panel] 状态同步失败 | instance={} | {}", inst.getName(), e.getMessage());
+        }
     }
 
     @Override
