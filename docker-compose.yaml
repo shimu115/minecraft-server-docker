@@ -27,11 +27,7 @@ services:
           - mc-server-1
 
   panel:
-#    build:
-#      context: ./panel
-#      dockerfile: Dockerfile
-#      args:
-#        CACHE_BUST: "${CACHE_BUST:-unknown}"
+    image: shimu/minecraft-panel:api-dev
     container_name: mc-panel
     ports:
       - "${PANEL_PORT:-8080}:8080"
