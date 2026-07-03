@@ -27,7 +27,8 @@ public class TryCatchGlobalException {
 
 
     /**
-     * 自定义业务异常 —— 使用 ErrorCode 中绑定的 code + msg
+     * 自定义业务异常 —— 使用 ErrorCode 中绑定的 code + msg。
+     * 若异常携带了不同于 ErrorCode 默认值的自定义消息，则优先使用自定义消息。
      */
     @ExceptionHandler(McPanelException.class)
     public ResponseEntity<ApiResponse<Void>> handleMcPanelException(
@@ -37,9 +38,19 @@ public class TryCatchGlobalException {
                 request.getMethod(), request.getRequestURI(),
                 ex.getErrorCode().getCode(), ex.getMessage());
 
+        ErrorCode ec = ex.getErrorCode();
+        String msg = ex.getMessage();
+
+        // 自定义消息优先（如 AgentClient 翻译的 Go API 错误）
+        if (msg != null && !msg.equals(ec.getMsg())) {
+            return ResponseEntity
+                    .status(HttpStatus.OK)
+                    .body(ApiResponse.error(ec.getCode(), msg, null));
+        }
+
         return ResponseEntity
                 .status(HttpStatus.OK)
-                .body(ApiResponse.error(ex.getErrorCode()));
+                .body(ApiResponse.error(ec));
     }
 
     /**
