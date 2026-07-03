@@ -33,9 +33,9 @@
 
             <n-divider />
 
-            <n-space vertical>
+            <n-space>
               <n-button type="primary" @click="handleHealthCheck" :loading="healthLoading">健康检查</n-button>
-              <n-button @click="showBindKey = true">更换绑定 Key</n-button>
+              <n-button @click="showBindKey = true; loadKeysForBind()">更换绑定 Key</n-button>
               <n-button type="warning" @click="handleRefreshKey" :loading="refreshLoading"
                 v-if="isRoot">刷新 API Key</n-button>
             </n-space>
@@ -65,7 +65,16 @@
         </n-space>
 
         <div v-if="serverStatus" style="margin-bottom: 12px">
-          <n-code :code="serverStatus" language="json" />
+          <n-descriptions :column="3" label-placement="left" bordered size="small">
+            <n-descriptions-item label="状态">
+              <n-tag :type="serverStatus.running ? 'success' : 'error'" size="small">
+                {{ serverStatus.running ? '运行中' : '已停止' }}
+              </n-tag>
+            </n-descriptions-item>
+            <n-descriptions-item label="玩家">{{ serverStatus.players ?? 0 }}</n-descriptions-item>
+            <n-descriptions-item v-if="serverStatus.uptime" label="运行时长">{{ serverStatus.uptime }}</n-descriptions-item>
+            <n-descriptions-item v-if="serverStatus.version" label="MC 版本">{{ serverStatus.version }}</n-descriptions-item>
+          </n-descriptions>
         </div>
 
         <n-divider>发送指令</n-divider>
@@ -99,7 +108,7 @@ import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   NCard, NButton, NDescriptions, NDescriptionsItem, NDivider,
-  NSpace, NGrid, NGridItem, NInput, NTag, NCode, NAlert,
+  NSpace, NGrid, NGridItem, NInput, NTag, NAlert,
   NModal, NSelect, NSpin, createDiscreteApi,
 } from 'naive-ui';
 import { getInstance, updateInstance, bindKey, refreshKey, healthCheck } from '@/api/instances';
@@ -138,9 +147,16 @@ const bindLoading = ref(false);
 const command = ref('');
 const cmdLoading = ref(false);
 const cmdHistory = ref<string[]>([]);
+interface ServerStatus {
+  running: boolean;
+  players: number;
+  uptime?: string;
+  version?: string;
+}
+
 const actionLoading = ref<string | null>(null);
 const statusLoading = ref(false);
-const serverStatus = ref<string | null>(null);
+const serverStatus = ref<ServerStatus | null>(null);
 
 onMounted(async () => {
   try {
@@ -154,6 +170,7 @@ async function loadInstance() {
   loading.value = true;
   try {
     instance.value = await getInstance(instanceId);
+    console.log(instance.value)
   } finally { loading.value = false; }
 }
 
@@ -228,8 +245,10 @@ async function handleServerAction(action: string) {
 async function handleStatus() {
   statusLoading.value = true;
   try {
-    const result = await getStatus(instanceId);
-    serverStatus.value = JSON.stringify(result, null, 2);
+    const goRaw = await getStatus(instanceId);
+    // Go API 返回 JSON 字符串，解析后提取 data 字段
+    const parsed = typeof goRaw === 'string' ? JSON.parse(goRaw) : goRaw;
+    serverStatus.value = parsed.data || parsed;
   } finally { statusLoading.value = false; }
 }
 
