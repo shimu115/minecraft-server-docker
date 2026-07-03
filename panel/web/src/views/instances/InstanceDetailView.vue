@@ -77,14 +77,25 @@
           </n-descriptions>
         </div>
 
-        <n-divider>发送指令</n-divider>
-        <n-space>
-          <n-input v-model:value="command" placeholder="输入 MC 指令（如 list）" style="width: 300px"
-            @keyup.enter="handleSendCommand" />
-          <n-button type="primary" @click="handleSendCommand" :loading="cmdLoading">发送</n-button>
-        </n-space>
-        <div v-if="cmdHistory.length" style="margin-top: 12px">
-          <n-tag v-for="(cmd, i) in cmdHistory" :key="i" style="margin: 4px">$ {{ cmd }}</n-tag>
+        <!-- 终端模拟 -->
+        <div class="terminal" ref="terminalRef">
+          <div class="terminal-output">
+            <div v-for="(entry, i) in terminalLines" :key="i"
+              :class="['terminal-line', entry.type]">
+              <span v-if="entry.type === 'input'" class="prompt">$ </span>
+              <span>{{ entry.text }}</span>
+            </div>
+          </div>
+          <div class="terminal-input-row">
+            <span class="prompt">$ </span>
+            <input
+              v-model="command"
+              class="terminal-input"
+              placeholder="输入 MC 指令…"
+              @keyup.enter="handleSendCommand"
+              :disabled="cmdLoading"
+            />
+          </div>
         </div>
       </n-card>
     </n-spin>
@@ -104,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   NCard, NButton, NDescriptions, NDescriptionsItem, NDivider,
@@ -146,7 +157,26 @@ const bindLoading = ref(false);
 // Console
 const command = ref('');
 const cmdLoading = ref(false);
-const cmdHistory = ref<string[]>([]);
+const terminalRef = ref<HTMLElement | null>(null);
+
+interface TerminalLine {
+  type: 'input' | 'output' | 'info';
+  text: string;
+}
+const terminalLines = ref<TerminalLine[]>([]);
+
+function appendTerminal(type: TerminalLine['type'], text: string) {
+  terminalLines.value.push({ type, text });
+  // 保留最近 500 行
+  if (terminalLines.value.length > 500) {
+    terminalLines.value = terminalLines.value.slice(-500);
+  }
+  nextTick(() => {
+    if (terminalRef.value) {
+      terminalRef.value.scrollTop = terminalRef.value.scrollHeight;
+    }
+  });
+}
 interface ServerStatus {
   running: boolean;
   players: number;
@@ -158,12 +188,57 @@ const actionLoading = ref<string | null>(null);
 const statusLoading = ref(false);
 const serverStatus = ref<ServerStatus | null>(null);
 
+let logAbortController: AbortController | null = null;
+
+async function connectLogs() {
+  const token = localStorage.getItem('token');
+  if (!token) return;
+
+  logAbortController = new AbortController();
+  try {
+    const response = await fetch(`/api/server/${instanceId}/get-logs?tail=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: logAbortController.signal,
+    });
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const data = line.substring(5).trim();
+          if (data) appendTerminal('output', data);
+        }
+      }
+    }
+  } catch {
+    // connection closed or aborted
+  }
+}
+
+function disconnectLogs() {
+  logAbortController?.abort();
+  logAbortController = null;
+}
+
 onMounted(async () => {
   try {
     const me = await getMe();
     isRoot.value = me.role === 'ROOT';
   } catch { /* ignore */ }
   await loadInstance();
+  connectLogs();
+});
+
+onUnmounted(() => {
+  disconnectLogs();
 });
 
 async function loadInstance() {
@@ -232,16 +307,6 @@ async function handleBindKey() {
   } finally { bindLoading.value = false; }
 }
 
-async function handleServerAction(action: string) {
-  actionLoading.value = action;
-  try {
-    if (action === 'start') await startServer(instanceId);
-    else if (action === 'stop') await stopServer(instanceId);
-    else if (action === 'restart') await restartServer(instanceId);
-    message.success(`${action} 指令已发送`);
-  } finally { actionLoading.value = null; }
-}
-
 async function handleStatus() {
   statusLoading.value = true;
   try {
@@ -254,11 +319,91 @@ async function handleStatus() {
 
 async function handleSendCommand() {
   if (!command.value.trim()) return;
+  const cmd = command.value.trim();
+  appendTerminal('input', cmd);
+  command.value = '';
   cmdLoading.value = true;
   try {
-    await sendCommand(instanceId, command.value);
-    cmdHistory.value.unshift(command.value);
-    command.value = '';
-  } finally { cmdLoading.value = false; }
+    await sendCommand(instanceId, cmd);
+  } catch {
+    // 错误已由拦截器处理
+  } finally {
+    cmdLoading.value = false;
+  }
+}
+
+async function handleServerAction(action: string) {
+  actionLoading.value = action;
+  try {
+    if (action === 'start') await startServer(instanceId);
+    else if (action === 'stop') await stopServer(instanceId);
+    else if (action === 'restart') await restartServer(instanceId);
+    appendTerminal('info', `${action} 指令已发送`);
+    message.success(`${action} 指令已发送`);
+  } catch {
+    // 错误已由拦截器处理
+  } finally { actionLoading.value = null; }
 }
 </script>
+
+<style scoped>
+.terminal {
+  background: #1a1a2e;
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+  color: #e0e0e0;
+}
+
+.terminal-output {
+  min-height: 60px;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-line.input {
+  color: #4fc3f7;
+}
+.terminal-line.info {
+  color: #81c784;
+}
+.terminal-line.output {
+  color: #b0bec5;
+}
+
+.prompt {
+  color: #66bb6a;
+  user-select: none;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-family: inherit;
+  font-size: inherit;
+  caret-color: #66bb6a;
+}
+.terminal-input::placeholder {
+  color: #555;
+}
+.terminal-input:disabled {
+  opacity: 0.5;
+}
+</style>
