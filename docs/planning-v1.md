@@ -1085,15 +1085,28 @@ refreshKey()    → POST /api/auth/refresh
 
 ## P3
 
-**业务逻辑深化 + 文件管理：**
+**业务逻辑深化 + 权限体系 + 文件管理。**
 
-* 用户/角色/权限 CRUD（users / roles / user_role 表）
-* 资源保护规则初始化（protected_resource 表）
-* 文件管理代理接口（Spring Boot 鉴权 → Go API 执行）
-* 操作日志（operation_logs 表）
-* File Manager 前端页面
-* 玩家管理（kick / whitelist / op）
-* Docker SDK 接入
+在 P2 全栈基础设施之上建立完整的三层权限模型（角色边界 → 路径级 ACL → 资源保护兜底），
+并以此为底座实现文件管理代理、server.properties 表格式编辑器、玩家管理、操作审计、
+Docker 容器监控等功能。同时引入动态路由，不同角色看到不同的侧边栏和功能入口。
+
+主要内容：
+
+* **权限体系**：三层模型 —— `users.role` 角色边界 + `user_path_permissions` 路径级 ACL（ROOT 可为每个 ADMIN 逐实例逐路径配置管理权限）+ `protected_resources` 资源保护兜底（Go API 硬编码作为最后防线）
+* **配置文件属性权限**：`config_property_permissions` 表，server.properties 采用表格式编辑器，每个属性独立控制编辑权限（ROOT-only / ADMIN 可编辑）
+* **路径级 ACL**：无 ACL 记录 = 路径对用户完全不可见，仅目录级粒度（前缀匹配），新建 ADMIN 自动套用默认模板
+* **动态路由**：侧边栏根据 `role` 动态渲染，ROOT 见全部功能，ADMIN 见服务器管理 + 仪表盘，USER 仅见仪表盘
+* **USER 角色定位**：只读观察者——可查看绑定实例的运行状态、控制台日志、在线玩家列表，不可执行任何管理操作
+* **文件管理代理**：Spring Boot 鉴权（角色 + ACL + 保护资源检查）→ AgentClient 转发 Go API，全量代理 list/read/write/delete/upload/download/export/mkdir/rename
+* **资源保护**：实例注册时根据 `server_type` 自动初始化保护规则（world/server.properties/ops.json 等），删除受保护资源需 ROOT + force=true + 二次确认
+* **玩家管理**：kick / whitelist / op，复用 `POST /api/command` + 文件读取，OP 管理仅限 ROOT
+* **操作日志**：`operation_logs` 表记录全部敏感操作，支持筛选/分页/CSV 导出
+* **Docker SDK**：容器资源监控（CPU/内存/网络/uptime），Docker 不可达时降级显示
+* **Go API 改动**：最小化——delete 新增 `force` 参数、新增 mkdir 和 rename 端点，总计约 55 行
+* **数据库新增**：`user_path_permissions` / `config_property_permissions` / `protected_resources` / `operation_logs` 四张表
+
+> 详细实施方案见 [p3-plan](p3-plan.md)
 
 ---
 
