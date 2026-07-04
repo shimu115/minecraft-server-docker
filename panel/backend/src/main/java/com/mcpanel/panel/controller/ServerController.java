@@ -110,7 +110,7 @@ public class ServerController {
                 }
                 emitter.complete();
             } catch (Exception e) {
-                log.debug("[mc-panel] SSE 日志流异常 | {} | {}", ctx.baseUrl, e.getMessage());
+                log.error("[mc-panel] SSE 日志流异常 | {} | {}", ctx.baseUrl, e.getMessage());
                 if (conn != null) conn.disconnect();
                 emitter.completeWithError(e);
             }

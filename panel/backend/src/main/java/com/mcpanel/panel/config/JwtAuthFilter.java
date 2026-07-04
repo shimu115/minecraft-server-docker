@@ -5,11 +5,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -18,16 +16,16 @@ import java.util.List;
 /**
  * JWT 认证过滤器。
  * 从 Authorization: Bearer <token> 提取 JWT，校验后设置 SecurityContext。
+ * 由 SecurityConfig 显式注册为 Bean，不使用 @Component（避免与 Spring Boot
+ * 自动 Filter 注册冲突导致双重执行）。
  */
-@Component
 public class JwtAuthFilter extends OncePerRequestFilter {
 
-    @Autowired
-    private JwtUtil jwtUtil;
+    private final JwtUtil jwtUtil;
 
-//    public JwtAuthFilter(JwtUtil jwtUtil) {
-//        this.jwtUtil = jwtUtil;
-//    }
+    public JwtAuthFilter(JwtUtil jwtUtil) {
+        this.jwtUtil = jwtUtil;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -62,9 +60,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    /**
-     * JWT 中提取的用户主体信息。
-     */
     public record JwtUserPrincipal(Long userId, String username, String role) {
         public boolean isRoot() { return "ROOT".equals(role); }
     }
