@@ -347,31 +347,34 @@ Admin/User：必须在 user_instances 中绑定实例后才能操作
 ### 后端实现
 
 ```java
+@Builder
+@Getter
 public class ApiResponse<T> {
+
     private int code;
     private String msg;
     private T data;
 
-    private ApiResponse(int code, String msg, T data) {
-        this.code = code;
-        this.msg = msg;
-        this.data = data;
-    }
-
     // === 成功 ===
     public static <T> ApiResponse<T> success(T data) {
-        return new ApiResponse<>(200, "ok", data);
+        return ApiResponse.<T>builder().code(200).msg(ErrorCode.SUCCESS.getMsg()).data(data).build();
     }
     public static <T> ApiResponse<T> success() {
-        return new ApiResponse<>(200, "ok", null);
+        return ApiResponse.<T>builder().code(200).msg(ErrorCode.SUCCESS.getMsg()).data(null).build();
     }
 
     // === 错误 ===
     public static <T> ApiResponse<T> error(ErrorCode ec) {
-        return new ApiResponse<>(ec.getCode(), ec.getMsg(), null);
+        return ApiResponse.<T>builder().code(ec.getCode()).msg(ec.getMsg()).data(null).build();
     }
-    public static <T> ApiResponse<T> error(ErrorCode ec, T data) {
-        return new ApiResponse<>(ec.getCode(), ec.getMsg(), data);
+    public static <T> ApiResponse<T> error(int code, String msg) {
+        return ApiResponse.<T>builder().code(code).msg(msg).data(null).build();
+    }
+    public static <T> ApiResponse<T> error() {
+        return ApiResponse.<T>builder()
+                .code(ErrorCode.INTERNAL_ERROR.getCode())
+                .msg(ErrorCode.INTERNAL_ERROR.getMsg())
+                .data(null).build();
     }
 }
 ```
@@ -554,7 +557,7 @@ public class TryCatchGlobalException {
 
         return ResponseEntity
                 .status(HttpStatus.OK)
-                .body(new ApiResponse<>(ErrorCode.BAD_REQUEST.getCode(), detail, null));
+                .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), detail));
     }
 
     /**

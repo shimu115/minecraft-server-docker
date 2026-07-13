@@ -45,7 +45,7 @@ public class TryCatchGlobalException {
         if (msg != null && !msg.equals(ec.getMsg())) {
             return ResponseEntity
                     .status(HttpStatus.OK)
-                    .body(ApiResponse.error(ec.getCode(), msg, null));
+                    .body(ApiResponse.error(ec.getCode(), msg));
         }
 
         return ResponseEntity
@@ -70,7 +70,7 @@ public class TryCatchGlobalException {
 
         return ResponseEntity
                 .status(HttpStatus.OK)
-                .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), detail, null));
+                .body(ApiResponse.error(ErrorCode.BAD_REQUEST.getCode(), detail));
     }
 
     /**
