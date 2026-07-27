@@ -29,7 +29,7 @@
 | [rest-api-specification.md](rest-api-specification.md) | REST API 设计规范 |
 | [api-response-specification.md](api-response-specification.md) | ApiResponse 统一返回规范 |
 | naming-specification.md | 命名规范（待完善） |
-| exception-specification.md | 异常处理规范（待完善） |
+| [exception-specification.md](exception-specification.md) | 异常处理规范 |
 | validation-specification.md | 参数校验规范（待完善） |
 | mybatis-specification.md | MyBatis 开发规范（待完善） |
 | logging-specification.md | 日志规范（待完善） |
