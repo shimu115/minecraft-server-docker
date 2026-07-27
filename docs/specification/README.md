@@ -15,6 +15,8 @@
 3. 分层开发规范
 4. REST API 规范
 5. ApiResponse 统一响应规范
+6. 异常处理规范
+7. 错误码规范
 
 其他规范可根据实际开发需求进行查阅。
 
@@ -30,6 +32,7 @@
 | [api-response-specification.md](api-response-specification.md) | ApiResponse 统一返回规范 |
 | naming-specification.md | 命名规范（待完善） |
 | [exception-specification.md](exception-specification.md) | 异常处理规范 |
+| [error-code-specification.md](error-code-specification.md) | 错误码规范 |
 | validation-specification.md | 参数校验规范（待完善） |
 | mybatis-specification.md | MyBatis 开发规范（待完善） |
 | logging-specification.md | 日志规范（待完善） |
@@ -46,6 +49,8 @@
 | [实体对象规范](model-specification.md)                       | 定义 Request、Response、VO、PO、DTO 的职责 |
 | [REST API 规范](rest-api-specification.md)               | 定义 URI、HTTP Method、接口文档等设计规范 |
 | [ApiResponse 规范](api-response-specification.md)        | 定义统一响应格式 |
+| [异常处理规范](exception-specification.md)                     | 定义异常抛出、捕获及全局处理规范 |
+| [错误码规范](error-code-specification.md)                    | 定义业务状态码号段分配及使用规范 |
 | [api.md](../../panel\backend\src\main\resources\docs/api.md) | 项目接口索引及导航 |
 
 ---

@@ -152,27 +152,30 @@ public AgentResponse refreshKey(String instanceId) {
 ```java
 // 方式一：仅携带 ErrorCode，消息使用枚举默认值
 throw new McPanelException(ErrorCode.USER_NOT_FOUND);
-// → ApiResponse.error(5000, "用户不存在")
+// → ApiResponse.error(30000, "用户不存在")
 
 // 方式二：携带自定义消息，优先于枚举默认值（适用于需要传递动态信息的场景）
 throw new McPanelException(ErrorCode.AGENT_UNREACHABLE, e.getMessage());
-// → ApiResponse.error(6000, "Connection refused: connect")
+// → ApiResponse.error(60000, "Connection refused: connect")
 ```
 
 ### ErrorCode 选择原则
 
 ErrorCode 按业务模块分段管理，选择与异常发生位置最匹配的编码：
 
-| 段 | 范围 | 说明 |
-|----|------|------|
-| 1xxx | 通用错误 | `BAD_REQUEST`、`INTERNAL_ERROR` |
-| 2xxx | 认证错误 | `UNAUTHORIZED`、`FORBIDDEN`、`INVALID_CREDENTIALS` |
-| 3xxx | API Key | `KEY_NOT_FOUND`、`KEY_ALREADY_EXISTS` … |
-| 4xxx | 实例 | `INSTANCE_NOT_FOUND`、`INSTANCE_NAME_EXISTS` … |
-| 5xxx | 用户 | `USER_NOT_FOUND`、`USERNAME_EXISTS` … |
-| 6xxx | Agent 通信 | `AGENT_UNREACHABLE`、`AGENT_TIMEOUT` … |
+| 号段 | 模块 | 枚举示例 |
+|------|------|---------|
+| `200` | 成功 | `SUCCESS` |
+| `10000` ~ `19999` | 通用错误 | `BAD_REQUEST`、`INTERNAL_ERROR` |
+| `20000` ~ `29999` | 认证授权 | `UNAUTHORIZED`、`FORBIDDEN`、`INVALID_CREDENTIALS` |
+| `30000` ~ `39999` | 用户 | `USER_NOT_FOUND`、`USERNAME_EXISTS` … |
+| `40000` ~ `49999` | API Key | `KEY_NOT_FOUND`、`KEY_ALREADY_EXISTS` … |
+| `50000` ~ `59999` | 实例 | `INSTANCE_NOT_FOUND`、`INSTANCE_NAME_EXISTS` … |
+| `60000` ~ `69999` | Agent 通信 | `AGENT_UNREACHABLE`、`AGENT_TIMEOUT` … |
 
-新增业务场景时，应在对应段位追加 ErrorCode，不得硬编码数字。
+完整错误码定义参见 [error-code-specification.md](error-code-specification.md)。
+
+新增业务场景时，应在对应模块号段内递增追加，不得硬编码数字。
 
 ---
 
@@ -257,7 +260,7 @@ try {
 
 ```json
 {
-    "code": 4000,
+    "code": 50000,
     "msg": "MC 实例不存在",
     "data": null
 }
