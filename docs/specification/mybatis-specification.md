@@ -510,9 +510,8 @@ public class DatabaseIntegrityChecker implements ApplicationListener<Application
         log.error("=" .repeat(60));
 
         // 终止启动——继续运行只会产生更多难以排查的错误
-        throw new IllegalStateException(
-            "Database integrity check failed and cannot be auto-recovered. " +
-            "Reason: " + reason + ". See logs above for recovery instructions.");
+        // 遵循项目异常规范：业务异常统一使用 McPanelException
+        throw new McPanelException(ErrorCode.DB_INTEGRITY_FAILED, reason);
     }
 
     private boolean isReadableDatabase(String dbPath) {
@@ -590,6 +589,31 @@ public class DatabaseHealthMonitor {
     }
 }
 ```
+
+#### 4.3.5 数据库相关错误码
+
+以下错误码使用 `error-code-specification.md` 中预留的 **80000 ~ 89999（备份与恢复）** 号段，需在 `ErrorCode.java` 中新增：
+
+| 枚举值 | code | msg | 触发场景 |
+|--------|------|-----|----------|
+| `DB_INTEGRITY_FAILED` | `80000` | `数据库文件完整性校验失败` | 启动时 `PRAGMA integrity_check` 未通过且无法自动恢复 |
+| `DB_MIGRATION_FAILED` | `80001` | `数据库迁移失败` | MigrationRunner 执行迁移脚本出错，已回滚至备份 |
+| `DB_BACKUP_FAILED` | `80002` | `数据库备份失败` | 迁移前备份创建失败 |
+| `DB_RECOVERY_FAILED` | `80003` | `数据库备份恢复失败` | 用备份文件恢复后再次校验仍未通过 |
+| `DB_STRUCTURE_MISMATCH` | `80004` | `数据库表结构与预期不匹配` | 核心表缺失或无法访问 |
+
+使用方式遵循 `exception-specification.md` 的约定：
+
+```java
+// 启动阶段数据库不可恢复（硬失败，终止启动）
+throw new McPanelException(ErrorCode.DB_INTEGRITY_FAILED, reason);
+
+// 迁移失败但已回滚（软失败，记录后继续运行）
+log.error("Migration failed, rolled back | {}", e.getMessage());
+// 应用继续以旧版本数据库状态运行
+```
+
+> 注意：数据库相关异常统一使用 `McPanelException`，遵循项目异常规范（`exception-specification.md` 第 1 节——"业务异常统一使用 McPanelException，不直接使用 RuntimeException"）。
 
 ---
 
