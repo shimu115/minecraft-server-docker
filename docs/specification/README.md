@@ -34,7 +34,7 @@
 | [exception-specification.md](exception-specification.md) | 异常处理规范 |
 | [error-code-specification.md](error-code-specification.md) | 错误码规范 |
 | validation-specification.md | 参数校验规范（待完善） |
-| mybatis-specification.md | MyBatis 开发规范（待完善） |
+| [mybatis-specification.md](mybatis-specification.md) | MyBatis 代码规范与多数据库兼容方案 |
 | logging-specification.md | 日志规范（待完善） |
 
 ---
