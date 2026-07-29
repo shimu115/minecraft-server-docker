@@ -342,6 +342,61 @@ public void create(CreateUserRequest request);
 
 通过明确职责边界，使代码具备良好的可读性、可维护性和可扩展性。
 
+---
+
+# 11. 参数校验规范
+
+## 校验策略
+
+项目采用分层校验策略：
+
+| 层级 | 校验方式 | 适用场景 |
+|------|---------|---------|
+| Controller | `@Valid` + Bean Validation 注解 | 字段非空、格式、长度等基础校验 |
+| Service | 业务逻辑校验（手动编码） | 唯一性、权限、状态机等复杂业务规则 |
+
+## Controller 层校验
+
+- 简单参数校验使用 Bean Validation 注解（`@NotNull`、`@NotBlank`、`@Size` 等）
+- 统一使用 `@Valid` 触发校验，校验失败由全局异常处理器统一处理
+- 不要在 Controller 中手动检查校验结果
+
+```java
+public class CreateUserRequest {
+
+    @NotBlank(message = "用户名不能为空")
+    private String username;
+
+    @NotBlank(message = "密码不能为空")
+    @Size(min = 6, max = 32, message = "密码长度 6-32 位")
+    private String password;
+
+}
+```
+
+## Service 层校验
+
+- 涉及数据库查询的业务规则校验（如唯一性检查）放在 Service 层
+- 校验失败抛出对应业务异常，由全局异常处理器统一处理
+- 禁止在 Service 中使用 Bean Validation 注解校验入参
+
+```java
+public void create(CreateUserDTO dto) {
+    if (userMapper.existsByUsername(dto.getUsername())) {
+        throw new BusinessException(USER_ALREADY_EXISTS);
+    }
+    // 业务逻辑...
+}
+```
+
+## 禁止事项
+
+- ❌ 在 Controller 中手动 if-else 校验参数格式（应使用注解）
+- ❌ 在 Service 中使用 `@Valid` 校验 DTO（注解校验属于 Controller 层职责）
+- ❌ 校验失败后返回 `false` 或自定义对象（必须抛异常，由全局处理器统一处理）
+
+---
+
 > 所有 Request 与 Response 应提供完整的接口文档注解。
 > 
 > 字段说明应统一维护在实体类中，由 OpenAPI 文档自动生成接口说明。
