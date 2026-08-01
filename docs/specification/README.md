@@ -19,6 +19,8 @@
 
 其他规范可根据实际开发需求进行查阅。
 
+> 💡 编码时参考 [注解使用规范](annotation-specification.md)，确保 Lombok、Spring DI 等注解用法统一。
+
 ---
 
 # 规范目录
@@ -32,6 +34,7 @@
 | [异常处理规范](exception-specification.md) | 定义异常抛出、捕获、全局处理及日志记录规范 |
 | [错误码规范](error-code-specification.md) | 定义业务状态码号段分配及使用规范 |
 | [MyBatis 规范](mybatis-specification.md) | MyBatis 代码规范与多数据库兼容方案 |
+| [注解使用规范](annotation-specification.md) | Lombok、Spring DI、Jackson 等注解的统一使用规范 |
 | [api.md](../../panel/backend/src/main/resources/docs/api.md) | 项目接口索引及导航 |
 
 ---
@@ -52,4 +55,5 @@ AI 在生成代码时应遵循以下原则：
 - 不得违反实体对象规范。
 - 不得违反分层开发规范。
 - 不得违反 REST API 规范。
+- 不得违反注解使用规范（日志、依赖注入等）。
 - 保持与现有项目一致的代码风格。

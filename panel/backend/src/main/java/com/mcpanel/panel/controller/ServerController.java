@@ -12,6 +12,7 @@ import com.mcpanel.panel.repository.ApiKeyRepository;
 import com.mcpanel.panel.repository.ServerInstanceRepository;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,9 +27,8 @@ import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/server")
+@Slf4j
 public class ServerController {
-
-    private static final Logger log = LoggerFactory.getLogger(ServerController.class);
 
     @Autowired
     private ServerInstanceRepository instanceRepository;

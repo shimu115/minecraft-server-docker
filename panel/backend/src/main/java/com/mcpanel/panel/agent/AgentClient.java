@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mcpanel.panel.common.ErrorCode;
 import com.mcpanel.panel.exception.McPanelException;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -18,9 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
+@Slf4j
 public class AgentClient {
-
-    private static final Logger log = LoggerFactory.getLogger(AgentClient.class);
 
     /**
      * Go API 错误消息 → 中文翻译。

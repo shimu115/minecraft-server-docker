@@ -2,6 +2,7 @@ package com.mcpanel.panel.config;
 
 import com.mcpanel.panel.entity.User;
 import com.mcpanel.panel.repository.UserRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,9 +17,8 @@ import org.springframework.stereotype.Component;
  * 首次启动时自动创建默认 Root 用户。
  */
 @Component
+@Slf4j
 public class DataInitializer implements ApplicationRunner {
-
-    private static final Logger log = LoggerFactory.getLogger(DataInitializer.class);
 
     @Autowired
     private UserRepository userRepository;

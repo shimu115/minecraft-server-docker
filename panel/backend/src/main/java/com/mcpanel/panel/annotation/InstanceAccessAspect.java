@@ -4,6 +4,7 @@ import com.mcpanel.panel.common.ErrorCode;
 import com.mcpanel.panel.config.JwtAuthFilter;
 import com.mcpanel.panel.exception.McPanelException;
 import com.mcpanel.panel.repository.UserInstanceRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.slf4j.Logger;
@@ -15,9 +16,8 @@ import org.springframework.stereotype.Component;
 
 @Aspect
 @Component
+@Slf4j
 public class InstanceAccessAspect {
-
-    private static final Logger log = LoggerFactory.getLogger(InstanceAccessAspect.class);
 
     @Autowired
     private UserInstanceRepository userInstanceRepository;
